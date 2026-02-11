@@ -1,41 +1,101 @@
 import { useActivityTracker } from '@/hooks/useActivityTracker';
 import { useUIStore } from '@/stores/ui-store';
+import { useFlowStateStore } from '@/stores/flowstate-store';
+
+import { Sidebar, Header } from '@/components/UI';
+import { Dashboard } from '@/components/Dashboard';
+import { TaskManager } from '@/components/Tasks';
+import { Analytics } from '@/components/Analytics';
+import { QuestionnaireHub } from '@/components/Questionnaire';
+import { PrivacyDashboard } from '@/components/Privacy';
+import SettingsPage from '@/components/Settings/SettingsPage';
+import { BreakSuggestion } from '@/components/Interventions';
+import { FocusModeAlert } from '@/components/Interventions';
+
+import { useState, useEffect } from 'react';
 
 function App() {
     // Start activity tracking
     useActivityTracker();
 
     const activeTab = useUIStore((s) => s.activeTab);
+    const cognitiveState = useFlowStateStore((s) => s.cognitiveState);
+    const settings = useFlowStateStore((s) => s.settings);
+
+    // Intervention state
+    const [showBreakSuggestion, setShowBreakSuggestion] = useState(false);
+    const [showFlowAlert, setShowFlowAlert] = useState(false);
+    const [flowAlertDismissed, setFlowAlertDismissed] = useState(false);
+
+    // Show break suggestion when energy drops below 40 and break reminder is enabled
+    useEffect(() => {
+        if (cognitiveState.energyScore < 40 && settings.breakReminderEnabled && cognitiveState.timeSinceLastBreak > 45) {
+            setShowBreakSuggestion(true);
+        }
+    }, [cognitiveState.energyScore, cognitiveState.timeSinceLastBreak, settings.breakReminderEnabled]);
+
+    // Show flow state alert
+    useEffect(() => {
+        if (cognitiveState.isInFlowState && !flowAlertDismissed) {
+            setShowFlowAlert(true);
+        } else if (!cognitiveState.isInFlowState) {
+            setFlowAlertDismissed(false);
+        }
+    }, [cognitiveState.isInFlowState, flowAlertDismissed]);
+
+    const renderPage = () => {
+        switch (activeTab) {
+            case 'dashboard':
+                return <Dashboard />;
+            case 'tasks':
+                return <TaskManager />;
+            case 'analytics':
+                return <Analytics />;
+            case 'questionnaire':
+                return <QuestionnaireHub />;
+            case 'privacy':
+                return <PrivacyDashboard />;
+            case 'settings':
+                return <SettingsPage />;
+            default:
+                return <Dashboard />;
+        }
+    };
 
     return (
-        <div className="flex h-screen w-screen bg-dark-950 text-dark-100">
-            {/* Sidebar placeholder */}
-            <aside className="w-16 bg-dark-900 border-r border-dark-700/50 flex flex-col items-center py-6">
-                <div className="text-2xl font-bold text-energy-peak mb-8">⚡</div>
-                <p className="text-xs text-dark-400 [writing-mode:vertical-rl] rotate-180">
-                    FlowState
-                </p>
-            </aside>
+        <div className="flex h-screen w-screen bg-dark-950 text-dark-100 overflow-hidden">
+            {/* Sidebar */}
+            <Sidebar />
 
-            {/* Main content */}
-            <main className="flex-1 overflow-y-auto p-6">
-                <h1 className="text-3xl font-bold mb-2">
-                    FlowState <span className="text-energy-peak">⚡</span>
-                </h1>
-                <p className="text-dark-400 mb-8">
-                    AI-Powered Smart Task & Energy Manager
-                </p>
+            {/* Main Area */}
+            <div className="flex-1 flex flex-col min-w-0">
+                {/* Header */}
+                <Header />
 
-                <div className="glass-card">
-                    <h2 className="text-lg font-semibold mb-3">🚧 Under Construction</h2>
-                    <p className="text-dark-300">
-                        Directory structure is ready. Components will be built next.
-                    </p>
-                    <p className="text-dark-400 text-sm mt-2">
-                        Active tab: <code className="text-energy-peak">{activeTab}</code>
-                    </p>
-                </div>
-            </main>
+                {/* Page Content */}
+                <main className="flex-1 overflow-y-auto p-6">
+                    {/* Interventions */}
+                    {showFlowAlert && (
+                        <div className="mb-4">
+                            <FocusModeAlert
+                                onDismiss={() => {
+                                    setShowFlowAlert(false);
+                                    setFlowAlertDismissed(true);
+                                }}
+                            />
+                        </div>
+                    )}
+
+                    {showBreakSuggestion && activeTab === 'dashboard' && (
+                        <div className="mb-4">
+                            <BreakSuggestion onDismiss={() => setShowBreakSuggestion(false)} />
+                        </div>
+                    )}
+
+                    {/* Active Page */}
+                    {renderPage()}
+                </main>
+            </div>
         </div>
     );
 }

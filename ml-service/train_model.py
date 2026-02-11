@@ -14,7 +14,6 @@ from sklearn.preprocessing import StandardScaler
 import json
 import os
 
-# Feature names in the exact order expected by the model
 FEATURE_NAMES = [
     'typing_speed_5min',
     'typing_speed_15min',
@@ -198,6 +197,6 @@ if __name__ == '__main__':
     result = train_energy_model(data)
 
     if result:
-        print(f"\n✅ Model trained! MAE={result['mae']}, R²={result['r2']}")
+        print(f"\n[OK] Model trained! MAE={result['mae']}, R2={result['r2']}")
     else:
-        print("\n❌ Training failed!")
+        print("\n[FAIL] Training failed!")

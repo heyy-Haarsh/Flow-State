@@ -1,9 +1,3 @@
-"""
-FlowState - Energy Predictor Model
-====================================
-Model architecture and prediction utilities.
-"""
-
 import numpy as np
 import onnxruntime as ort
 
@@ -36,7 +30,6 @@ class EnergyPredictorModel:
         self.session = None
 
     def load(self, model_path):
-        """Load an ONNX model for inference."""
         self.session = ort.InferenceSession(model_path)
 
     def predict_from_onnx(self, model_path, features_dict):
@@ -53,18 +46,14 @@ class EnergyPredictorModel:
         if self.session is None:
             self.load(model_path)
 
-        # Convert dict to ordered numpy array
         feature_values = [float(features_dict.get(f, 0)) for f in FEATURE_NAMES]
         input_array = np.array([feature_values], dtype=np.float32)
 
-        # Get input name from model
         input_name = self.session.get_inputs()[0].name
 
-        # Run inference
         result = self.session.run(None, {input_name: input_array})
         prediction = float(result[0][0])
 
-        # Clamp to 0-100
         return round(max(0, min(100, prediction)), 1)
 
     def predict_batch(self, model_path, features_list):

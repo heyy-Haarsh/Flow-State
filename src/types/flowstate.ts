@@ -199,7 +199,7 @@ export interface FlowStateStore {
     lastBreakTime: number;
 
     // Baseline
-    baseline: UserBaseline | null;
+    baseline: UserBaseline;
 
     // Tasks
     tasks: Task[];

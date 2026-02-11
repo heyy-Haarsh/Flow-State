@@ -138,5 +138,5 @@ def predict():
 
 
 if __name__ == '__main__':
-    print("🧠 FlowState ML Service starting on port 5050...")
+    print("FlowState ML Service starting on port 5050...")
     app.run(host='0.0.0.0', port=5050, debug=True)
