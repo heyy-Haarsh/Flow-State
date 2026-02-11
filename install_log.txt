@@ -1,0 +1,18 @@
+﻿node.exe : npm error code ETARGET
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm error co 
+   de ETARGET:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm error notarget No matching version found for 
+uiohook-napi@1.7.0.
+npm error notarget In most cases you or one of your 
+dependencies are requesting
+npm error notarget a package version that doesn't exist.
+npm error A complete log of this run can be found in: 
+C:\Users\Harshad Chavan\AppData\Local\npm-cache\_logs\2026
+-02-11T18_09_53_682Z-debug-0.log

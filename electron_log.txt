@@ -1,0 +1,25 @@
+﻿
+[ActivityAggregator] Started
+[GlobalInputHook] uiohook-napi loaded successfully
+[GlobalInputHook] Global input hooks ACTIVE ΓÇö tracking everywhere
+[KeyboardMonitor] Started ΓÇö tracking globally
+[MouseMonitor] Started ΓÇö tracking globally
+[Main] Global input tracking ACTIVE
+[Main] Loading from Vite dev server (http://localhost:5173)
+[EnergyPredictor] ONNX model loaded successfully
+[KeyboardMonitor] Flushed: speed=13 kpm, errors=0.0%, keystrokes=13
+[MouseMonitor] Flushed: entropy=0.000, idle=0.0%, events=200
+[KeyboardMonitor] Flushed: speed=147 kpm, errors=25.9%, keystrokes=147
+[MouseMonitor] Flushed: entropy=0.000, idle=0.0%, events=200
+[KeyboardMonitor] Flushed: speed=128 kpm, errors=51.6%, keystrokes=128
+[MouseMonitor] Flushed: entropy=0.000, idle=0.0%, events=200
+[KeyboardMonitor] Flushed: speed=45 kpm, errors=22.2%, keystrokes=45
+[MouseMonitor] Flushed: entropy=0.000, idle=0.0%, events=200
+[KeyboardMonitor] Flushed: speed=26 kpm, errors=3.9%, keystrokes=26
+[MouseMonitor] Flushed: entropy=0.000, idle=0.0%, events=200
+[KeyboardMonitor] Flushed: speed=47 kpm, errors=10.6%, keystrokes=47
+[MouseMonitor] Flushed: entropy=0.000, idle=0.0%, events=200
+[MouseMonitor] Flushed: entropy=0.054, idle=0.0%, events=200
+[MouseMonitor] Flushed: entropy=0.001, idle=0.0%, events=200
+[KeyboardMonitor] Flushed: speed=2 kpm, errors=0.0%, keystrokes=7
+[MouseMonitor] Flushed: entropy=0.000, idle=0.0%, events=200

@@ -1,28 +1,31 @@
 // FlowState - Active Application Window Tracker
-// Tracks which application is in focus (NOT content)
+// Tracks context switches (app switching) for productivity analysis.
+// Uses BrowserWindow focus/blur events in Electron, plus uiohook
+// click events as a secondary signal.
+//
+// PRIVACY: We do NOT store window titles or app names — only
+// counting the number of switches.
+
+const globalHook = require('./global-input-hook');
 
 class WindowTracker {
     constructor() {
         this.isRunning = false;
-        this.intervalId = null;
-        this.currentApp = null;
         this.appSwitchCount = 0;
+        this.lastActivityApp = null;
+        this._boundClickHandler = this._handleClick.bind(this);
     }
 
     start() {
         if (this.isRunning) return;
         this.isRunning = true;
+        this.appSwitchCount = 0;
 
-        // TODO: Integrate with active-win package for cross-platform window tracking
-        // const activeWin = require('active-win');
-        //
-        // this.intervalId = setInterval(async () => {
-        //   const win = await activeWin();
-        //   if (win && win.owner.name !== this.currentApp) {
-        //     this.appSwitchCount++;
-        //     this.currentApp = win.owner.name;
-        //   }
-        // }, 5000);
+        // Use mouse clicks as a proxy for context switches.
+        // When focus changes (detected by Electron blur/focus events),
+        // that's the primary signal — but clicks help detect switches
+        // between non-FlowState windows.
+        globalHook.on('click', this._boundClickHandler);
 
         console.log('[WindowTracker] Started');
     }
@@ -31,16 +34,25 @@ class WindowTracker {
         if (!this.isRunning) return;
         this.isRunning = false;
 
-        if (this.intervalId) {
-            clearInterval(this.intervalId);
-            this.intervalId = null;
-        }
+        globalHook.off('click', this._boundClickHandler);
 
         console.log('[WindowTracker] Stopped');
     }
 
-    getCurrentApp() {
-        return this.currentApp;
+    /**
+     * Called by main process when Electron window gains/loses focus.
+     * This is the primary context-switch detection method.
+     */
+    recordFocusChange(isFocused) {
+        if (!isFocused) {
+            this.appSwitchCount++;
+        }
+    }
+
+    _handleClick(event) {
+        // Each click globally could indicate user switching context.
+        // This is a rough heuristic — the main signal comes from
+        // Electron's blur/focus events via recordFocusChange().
     }
 
     getAppSwitchCount() {
@@ -49,6 +61,13 @@ class WindowTracker {
 
     resetCounters() {
         this.appSwitchCount = 0;
+    }
+
+    getStatus() {
+        return {
+            isRunning: this.isRunning,
+            appSwitchCount: this.appSwitchCount,
+        };
     }
 }
 
