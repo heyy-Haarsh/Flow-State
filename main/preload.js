@@ -37,9 +37,10 @@ contextBridge.exposeInMainWorld('electron', {
     getDailySummary: (date) => ipcRenderer.invoke('get-daily-summary', date),
     getWeeklySummary: () => ipcRenderer.invoke('get-weekly-summary'),
 
-    // ML Model
+    // ML Model & Pipeline
     triggerModelTraining: () => ipcRenderer.invoke('trigger-model-training'),
     getModelStatus: () => ipcRenderer.invoke('get-model-status'),
+    getPipelinePrediction: () => ipcRenderer.invoke('get-pipeline-prediction'),
 
     // Privacy & Settings
     getSettings: () => ipcRenderer.invoke('get-settings'),

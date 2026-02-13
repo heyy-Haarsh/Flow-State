@@ -2,7 +2,9 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const db = require('./database/index');
 const queries = require('./database/queries');
-const mlInference = require('./services/ml-inference');
+const mlPipeline = require('./services/ml-inference');
+const interventionEngine = require('./services/intervention-engine');
+const { extractCurrentFeatures, recordInterventionResponse, recordTaskSwitch, resetTracking } = require('./ml/feature-extractor');
 const activityAggregator = require('./monitoring/activity-aggregator');
 const globalInputHook = require('./monitoring/global-input-hook');
 const keyboardMonitor = require('./monitoring/keyboard-monitor');
@@ -17,12 +19,14 @@ const state = {
 
 // ---- Service Initialization ----
 
-function initializeServices() {
-  // 1. Load ML model
+async function initializeServices() {
+  // 1. Load ML pipeline (all 3 models)
   try {
-    mlInference.loadModel();
+    await mlPipeline.loadModels();
+    const status = mlPipeline.getStatus();
+    console.log('[Main] ML Pipeline status:', JSON.stringify(status.pipelineLoaded));
   } catch (err) {
-    console.warn('[Main] Failed to load ML model:', err.message);
+    console.warn('[Main] Failed to load ML pipeline:', err.message);
   }
 
   // 2. Start activity aggregator (hourly rollups)
@@ -45,15 +49,23 @@ function initializeServices() {
 }
 
 // ---- Energy score update loop ----
-// Push energy score to renderer every 30 seconds
+// Push energy score + interventions to renderer every 30 seconds
 let energyInterval = null;
 
 function startEnergyLoop() {
   energyInterval = setInterval(async () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     try {
-      const score = await getEnergyScore();
-      mainWindow.webContents.send('energy-update', score);
+      const pipelineResult = await runPipeline();
+
+      // Send energy score
+      mainWindow.webContents.send('energy-update', pipelineResult.energyScore || 70);
+
+      // Check for interventions
+      const intervention = checkInterventions(pipelineResult);
+      if (intervention) {
+        mainWindow.webContents.send('intervention', intervention);
+      }
     } catch (err) {
       // Silently continue
     }
@@ -67,19 +79,19 @@ function stopEnergyLoop() {
   }
 }
 
-// ---- Energy Score Calculation ----
+// ---- Full Pipeline Run ----
 
-async function getEnergyScore() {
+async function runPipeline() {
   try {
     // 1. Get Activity Metrics
     const act5 = activityAggregator.getRecentMetrics(5);
     const act15 = activityAggregator.getRecentMetrics(15);
 
-    // Also get live stats from global monitors for more accurate real-time data
+    // Live stats from global monitors
     const kbLive = keyboardMonitor.getLiveStats();
     const msLive = mouseMonitor.getLiveStats();
 
-    // Merge live stats with aggregated (prefer live data if aggregated is empty)
+    // Merge live stats with aggregated
     const typingSpeed5 = act5.typingSpeed || kbLive.typingSpeed;
     const errorRate5 = act5.errorRate || kbLive.errorRate;
     const mouseEntropy = act5.mouseEntropy || msLive.entropy;
@@ -98,31 +110,67 @@ async function getEnergyScore() {
     // 4. Get Task Count
     const tasksCompleted = queries.getCompletedTasksCount(60);
 
-    // 5. Construct Feature Vector
-    const features = {
-      typing_speed_5min: typingSpeed5,
-      typing_speed_15min: act15.typingSpeed || typingSpeed5,
-      error_rate_5min: errorRate5,
-      error_rate_15min: act15.errorRate || errorRate5,
-      mouse_entropy: mouseEntropy,
-      idle_percentage: idlePercentage,
-      session_duration: (Date.now() - state.sessionStartTime) / 60000,
-      time_since_break: (Date.now() - state.lastBreakTime) / 60000,
-      tasks_completed_hour: tasksCompleted,
-      hour_of_day: new Date().getHours(),
-      day_of_week: new Date().getDay(),
-      sleep_quality: latestQ.sleep_quality || 7,
-      stress_level: latestQ.stress_level || 3,
-      caffeine_intake: latestQ.caffeine_intake || 1,
-      exercise_today: latestQ.exercise_today ? 1 : 0,
-      expected_difficulty: latestQ.expected_difficulty || 5,
-      typing_speed_ratio: typingSpeed5 / (baseline.baseline_typing_speed || 1),
-      error_rate_ratio: errorRate5 / (baseline.baseline_error_rate || 0.01),
+    // 5. Get intervention tracking state
+    const interventionState = interventionEngine.getTrackingState();
+
+    // 6. Build session context for feature extractor
+    const sessionContext = {
+      sessionDuration: (Date.now() - state.sessionStartTime) / 60000,
+      timeSinceBreak: (Date.now() - state.lastBreakTime) / 60000,
+      tasksCompletedHour: tasksCompleted,
+      sleepQuality: latestQ.sleep_quality || 7,
+      stressLevel: latestQ.stress_level || 3,
+      caffeineIntake: latestQ.caffeine_intake || 1,
+      exerciseToday: latestQ.exercise_today ? 1 : 0,
+      expectedDifficulty: latestQ.expected_difficulty || 5,
+      taskSwitchesLastHour: 0, // TODO: track from task switch events
+      userAvgSessionLength: 90,
+      historicalAcceptanceRate: interventionState.historicalAcceptanceRate,
+      currentTask: {}, // TODO: get from task manager
+      pendingTasks: [],
     };
 
-    // 6. Predict
-    const score = await mlInference.predict(features);
-    return score !== null ? score : 70;
+    // 7. Extract unified features
+    const features = extractCurrentFeatures(sessionContext);
+
+    // Enrich with intervention tracking
+    features.minutes_since_last_prompt = interventionState.minutesSinceLastPrompt;
+    features.last_prompt_accepted = interventionState.lastPromptAccepted ? 1 : 0;
+    features.prompts_dismissed_streak = interventionState.promptsDismissedStreak;
+    features.historical_acceptance_rate = interventionState.historicalAcceptanceRate;
+
+    // 8. Run full ML pipeline
+    const pipelineResult = await mlPipeline.predictPipeline(features);
+
+    return pipelineResult;
+  } catch (error) {
+    console.error('[Main] Pipeline error:', error);
+    return { energyScore: 70, shouldSuggestBreak: false, shouldSuggestSwitch: false };
+  }
+}
+
+// ---- Intervention Check ----
+
+function checkInterventions(pipelineResult) {
+  const context = {
+    currentEnergy: pipelineResult.energyScore || 70,
+    sessionDuration: (Date.now() - state.sessionStartTime) / 60000,
+    timeSinceBreak: (Date.now() - state.lastBreakTime) / 60000,
+    errorRate: 0, // TODO: pass from pipeline features
+    baselineErrorRate: 0.05,
+    currentTask: {},
+    pendingTasks: [],
+  };
+
+  return interventionEngine.evaluate(context, pipelineResult);
+}
+
+// ---- Legacy Energy Score (backward compatibility) ----
+
+async function getEnergyScore() {
+  try {
+    const result = await runPipeline();
+    return result.energyScore !== null ? result.energyScore : 70;
   } catch (error) {
     console.error('[Main] Error in get-energy-score:', error);
     return 70;
@@ -188,6 +236,11 @@ ipcMain.handle('get-energy-score', async () => {
   return await getEnergyScore();
 });
 
+// Full pipeline prediction (new)
+ipcMain.handle('get-pipeline-prediction', async () => {
+  return await runPipeline();
+});
+
 // Monitoring status — shows global tracking state
 ipcMain.handle('get-monitoring-status', () => {
   return {
@@ -233,6 +286,7 @@ ipcMain.handle('start-break', (_, type) => {
 
 ipcMain.handle('end-break', (_, id) => {
   state.lastBreakTime = Date.now();
+  interventionEngine.resetCooldown();
   return queries.endBreak(id, 0);
 });
 
@@ -240,20 +294,37 @@ ipcMain.handle('end-break', (_, id) => {
 ipcMain.handle('get-settings', () => queries.getAllSettings());
 ipcMain.handle('update-setting', (_, key, value) => queries.setSetting(key, value));
 
-// ML Model
+// ML Model Status (enhanced)
 ipcMain.handle('get-model-status', () => {
-  return mlInference.getStatus();
+  return mlPipeline.getStatus();
 });
 
 ipcMain.handle('trigger-model-training', async () => {
-  // Trigger Python training script
+  // Trigger Python training script (trains all 3 models)
   const { spawn } = require('child_process');
   return new Promise((resolve) => {
-    const proc = spawn('python', ['train_model.py'], {
+    const proc = spawn('python', ['export_onnx.py'], {
       cwd: path.join(__dirname, '../ml-service'),
     });
-    proc.on('close', (code) => {
-      resolve({ success: code === 0, exitCode: code });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    proc.on('close', async (code) => {
+      if (code === 0) {
+        // Reload models after training
+        try {
+          await mlPipeline.loadModels();
+        } catch (e) {
+          console.warn('[Main] Failed to reload models after training:', e.message);
+        }
+      }
+      resolve({
+        success: code === 0,
+        exitCode: code,
+        output: stdout.slice(-500),
+        pipelineStatus: mlPipeline.getStatus(),
+      });
     });
     proc.on('error', (err) => {
       resolve({ success: false, error: err.message });
@@ -301,6 +372,11 @@ ipcMain.handle('get-weekly-summary', () => {
 
 // Interventions
 ipcMain.handle('respond-intervention', (_, id, accepted) => {
+  // Update intervention engine tracking
+  interventionEngine.recordResponse(id, accepted);
+  // Update feature extractor tracking
+  recordInterventionResponse(accepted);
+  // Update database
   return queries.updateInterventionResponse(id, accepted, 0);
 });
 

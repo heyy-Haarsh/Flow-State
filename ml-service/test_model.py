@@ -1,7 +1,8 @@
 """
-FlowState - Model Accuracy Testing
-====================================
-Tests the trained ONNX model with various metrics and scenarios.
+FlowState - Pipeline Model Testing Suite
+==========================================
+Tests all 3 ONNX models with accuracy metrics, scenarios, and pipeline flow.
+
 Run: python test_model.py
 """
 
@@ -11,299 +12,387 @@ sys.stdout.reconfigure(encoding='utf-8')
 import numpy as np
 import onnxruntime as ort
 import os
-from train_model import train_energy_model, generate_dummy_data, FEATURE_NAMES
+from train_model import (
+    train_all_models, generate_dummy_data,
+    ENERGY_FEATURE_NAMES, BREAK_FEATURE_NAMES, TASK_SWITCH_FEATURE_NAMES
+)
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
-def load_onnx_model(model_path):
-    """Load the ONNX model for inference."""
+# ==============================================================================
+# ONNX HELPERS
+# ==============================================================================
+
+def load_onnx_model(model_path, name="model"):
+    """Load an ONNX model for inference."""
     if not os.path.exists(model_path):
-        print(f"[ERROR] Model not found: {model_path}")
+        print(f"  [SKIP] {name} not found: {model_path}")
         return None
     session = ort.InferenceSession(model_path)
-    print(f"[OK] ONNX model loaded: {model_path}")
-    print(f"     Input:  {session.get_inputs()[0].name} {session.get_inputs()[0].shape}")
-    print(f"     Output: {session.get_outputs()[0].name} {session.get_outputs()[0].shape}")
+    print(f"  [OK] {name} loaded: {model_path}")
+    print(f"       Input:  {session.get_inputs()[0].name} {session.get_inputs()[0].shape}")
+    print(f"       Output: {session.get_outputs()[0].name} {session.get_outputs()[0].shape}")
     return session
 
 
-def predict_onnx(session, features_dict):
-    """Make a single prediction using the ONNX model."""
-    values = [float(features_dict.get(f, 0)) for f in FEATURE_NAMES]
+def predict_regressor(session, features_dict, feature_names):
+    """Single regressor prediction."""
+    values = [float(features_dict.get(f, 0)) for f in feature_names]
     input_array = np.array([values], dtype=np.float32)
     input_name = session.get_inputs()[0].name
     result = session.run(None, {input_name: input_array})
-    pred = np.array(result[0]).flatten()
-    return float(pred[0])
+    return float(np.array(result[0]).flatten()[0])
 
 
-def predict_batch_onnx(session, data_list):
-    """Make batch predictions using the ONNX model."""
+def predict_classifier(session, features_dict, feature_names):
+    """Single classifier prediction. Returns probability of class 1."""
+    values = [float(features_dict.get(f, 0)) for f in feature_names]
+    input_array = np.array([values], dtype=np.float32)
+    input_name = session.get_inputs()[0].name
+    result = session.run(None, {input_name: input_array})
+    output = result[0]
+    if len(output.shape) > 1 and output.shape[1] > 1:
+        return float(output[0][1])
+    return float(output.flatten()[0])
+
+
+def predict_batch_regressor(session, data_list, feature_names):
+    """Batch regressor predictions."""
     all_values = []
-    for features_dict in data_list:
-        values = [float(features_dict.get(f, 0)) for f in FEATURE_NAMES]
+    for d in data_list:
+        values = [float(d.get(f, 0)) for f in feature_names]
         all_values.append(values)
     input_array = np.array(all_values, dtype=np.float32)
     input_name = session.get_inputs()[0].name
     result = session.run(None, {input_name: input_array})
-    preds = np.array(result[0]).flatten()
-    return [float(x) for x in preds]
+    return [float(x) for x in np.array(result[0]).flatten()]
 
 
-def test_accuracy(session, test_data):
-    """Test model accuracy on a dataset."""
-    print("\n" + "=" * 60)
-    print("  MODEL ACCURACY REPORT")
-    print("=" * 60)
+# ==============================================================================
+# TEST 1: ENERGY MODEL ACCURACY
+# ==============================================================================
 
-    # Get predictions
+def test_energy_accuracy(session, test_data):
+    """Test energy model accuracy on unseen data."""
+    print(f"\n{'='*60}")
+    print(f"  TEST 1: ENERGY MODEL ACCURACY")
+    print(f"{'='*60}")
+
     actuals = [d['current_energy'] for d in test_data]
-    predictions = predict_batch_onnx(session, test_data)
+    predictions = predict_batch_regressor(session, test_data, ENERGY_FEATURE_NAMES)
     predictions_clipped = [max(0, min(100, p)) for p in predictions]
 
-    # --- Core Metrics ---
     mae = mean_absolute_error(actuals, predictions_clipped)
     rmse = np.sqrt(mean_squared_error(actuals, predictions_clipped))
     r2 = r2_score(actuals, predictions_clipped)
-    mape = np.mean(np.abs((np.array(actuals) - np.array(predictions_clipped)) / np.clip(np.array(actuals), 1, None))) * 100
+    mape = np.mean(np.abs((np.array(actuals) - np.array(predictions_clipped)) /
+                          np.clip(np.array(actuals), 1, None))) * 100
 
-    print(f"\n  Samples tested: {len(test_data)}")
-    print(f"\n  --- Core Metrics ---")
-    print(f"  MAE  (Mean Absolute Error):   {mae:.2f} points")
-    print(f"  RMSE (Root Mean Sq Error):     {rmse:.2f} points")
-    print(f"  R2   (R-Squared):              {r2:.4f}  (1.0 = perfect)")
-    print(f"  MAPE (Mean Abs % Error):       {mape:.1f}%")
+    print(f"\n  Samples: {len(test_data)}")
+    print(f"  MAE:  {mae:.2f}  |  RMSE: {rmse:.2f}")
+    print(f"  R²:   {r2:.4f}  |  MAPE: {mape:.1f}%")
 
-    # --- Interpretation ---
-    print(f"\n  --- Interpretation ---")
     if mae < 5:
-        print(f"  [EXCELLENT] MAE < 5: Predictions are within ~5 energy points")
+        print(f"  [EXCELLENT] MAE < 5")
     elif mae < 10:
-        print(f"  [GOOD] MAE < 10: Predictions are within ~10 energy points")
+        print(f"  [GOOD] MAE < 10")
     elif mae < 15:
-        print(f"  [FAIR] MAE < 15: Model has moderate accuracy")
+        print(f"  [FAIR] MAE < 15")
     else:
-        print(f"  [POOR] MAE >= 15: Model needs more/better training data")
+        print(f"  [POOR] MAE >= 15")
 
-    if r2 > 0.8:
-        print(f"  [EXCELLENT] R2 > 0.80: Model explains {r2*100:.1f}% of variance")
-    elif r2 > 0.6:
-        print(f"  [GOOD] R2 > 0.60: Model explains {r2*100:.1f}% of variance")
-    elif r2 > 0.4:
-        print(f"  [FAIR] R2 > 0.40: Model explains {r2*100:.1f}% of variance")
-    else:
-        print(f"  [POOR] R2 < 0.40: Model struggles to explain the data")
-
-    # --- Error Distribution ---
-    errors = np.array(actuals) - np.array(predictions_clipped)
-    abs_errors = np.abs(errors)
-
-    print(f"\n  --- Error Distribution ---")
-    print(f"  Min error:    {abs_errors.min():.2f} points")
-    print(f"  Max error:    {abs_errors.max():.2f} points")
-    print(f"  Median error: {np.median(abs_errors):.2f} points")
-    print(f"  Std dev:      {np.std(errors):.2f} points")
-
-    # Accuracy buckets
-    within_5 = np.sum(abs_errors <= 5) / len(abs_errors) * 100
-    within_10 = np.sum(abs_errors <= 10) / len(abs_errors) * 100
-    within_15 = np.sum(abs_errors <= 15) / len(abs_errors) * 100
-    within_20 = np.sum(abs_errors <= 20) / len(abs_errors) * 100
-
-    print(f"\n  --- Accuracy Buckets ---")
-    print(f"  Within  5 points: {within_5:.1f}% of predictions")
-    print(f"  Within 10 points: {within_10:.1f}% of predictions")
-    print(f"  Within 15 points: {within_15:.1f}% of predictions")
-    print(f"  Within 20 points: {within_20:.1f}% of predictions")
+    errors = np.abs(np.array(actuals) - np.array(predictions_clipped))
+    within_5 = np.sum(errors <= 5) / len(errors) * 100
+    within_10 = np.sum(errors <= 10) / len(errors) * 100
+    print(f"  Within  5 pts: {within_5:.1f}%  |  Within 10 pts: {within_10:.1f}%")
 
     return mae, r2
 
 
-def test_scenarios(session):
-    """Test the model with realistic user scenarios."""
-    print("\n" + "=" * 60)
-    print("  SCENARIO TESTING")
-    print("=" * 60)
+# ==============================================================================
+# TEST 2: BREAK MODEL ACCURACY
+# ==============================================================================
+
+def test_break_accuracy(session, test_data, threshold=0.5):
+    """Test break suggestion model accuracy."""
+    print(f"\n{'='*60}")
+    print(f"  TEST 2: BREAK MODEL ACCURACY")
+    print(f"{'='*60}")
+
+    actuals = [d['break_target'] for d in test_data]
+    proba_list = []
+    for d in test_data:
+        p = predict_classifier(session, d, BREAK_FEATURE_NAMES)
+        proba_list.append(p)
+
+    predictions = [1 if p >= threshold else 0 for p in proba_list]
+
+    # Metrics
+    tp = sum(1 for a, p in zip(actuals, predictions) if a == 1 and p == 1)
+    fp = sum(1 for a, p in zip(actuals, predictions) if a == 0 and p == 1)
+    fn = sum(1 for a, p in zip(actuals, predictions) if a == 1 and p == 0)
+    tn = sum(1 for a, p in zip(actuals, predictions) if a == 0 and p == 0)
+
+    accuracy = (tp + tn) / len(actuals) * 100
+    precision = tp / (tp + fp) * 100 if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) * 100 if (tp + fn) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall + 1e-10)
+
+    print(f"\n  Samples: {len(test_data)}  |  Threshold: {threshold:.3f}")
+    print(f"  Accuracy:  {accuracy:.1f}%")
+    print(f"  Precision: {precision:.1f}%  |  Recall: {recall:.1f}%")
+    print(f"  F1 Score:  {f1:.1f}%")
+    print(f"  TP: {tp}  FP: {fp}  FN: {fn}  TN: {tn}")
+
+    # Distribution of probabilities
+    pos_probs = [p for p, a in zip(proba_list, actuals) if a == 1]
+    neg_probs = [p for p, a in zip(proba_list, actuals) if a == 0]
+    print(f"\n  Avg prob (positive): {np.mean(pos_probs):.3f}" if pos_probs else "")
+    print(f"  Avg prob (negative): {np.mean(neg_probs):.3f}" if neg_probs else "")
+
+    return accuracy, f1
+
+
+# ==============================================================================
+# TEST 3: TASK SWITCH MODEL ACCURACY
+# ==============================================================================
+
+def test_task_switch_accuracy(session, test_data, threshold=0.5):
+    """Test task switch model accuracy."""
+    print(f"\n{'='*60}")
+    print(f"  TEST 3: TASK SWITCH MODEL ACCURACY")
+    print(f"{'='*60}")
+
+    actuals = [d['task_switch_target'] for d in test_data]
+    proba_list = []
+    for d in test_data:
+        p = predict_classifier(session, d, TASK_SWITCH_FEATURE_NAMES)
+        proba_list.append(p)
+
+    predictions = [1 if p >= threshold else 0 for p in proba_list]
+
+    tp = sum(1 for a, p in zip(actuals, predictions) if a == 1 and p == 1)
+    fp = sum(1 for a, p in zip(actuals, predictions) if a == 0 and p == 1)
+    fn = sum(1 for a, p in zip(actuals, predictions) if a == 1 and p == 0)
+    tn = sum(1 for a, p in zip(actuals, predictions) if a == 0 and p == 0)
+
+    accuracy = (tp + tn) / len(actuals) * 100
+    precision = tp / (tp + fp) * 100 if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) * 100 if (tp + fn) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall + 1e-10)
+
+    print(f"\n  Samples: {len(test_data)}  |  Threshold: {threshold:.3f}")
+    print(f"  Accuracy:  {accuracy:.1f}%")
+    print(f"  Precision: {precision:.1f}%  |  Recall: {recall:.1f}%")
+    print(f"  F1 Score:  {f1:.1f}%")
+    print(f"  TP: {tp}  FP: {fp}  FN: {fn}  TN: {tn}")
+
+    return accuracy, f1
+
+
+# ==============================================================================
+# TEST 4: PIPELINE SCENARIO TESTING
+# ==============================================================================
+
+def test_pipeline_scenarios(energy_session, break_session, switch_session):
+    """Test full pipeline with realistic scenarios."""
+    print(f"\n{'='*60}")
+    print(f"  TEST 4: FULL PIPELINE SCENARIOS")
+    print(f"{'='*60}")
 
     scenarios = {
-        "Morning - Well Rested": {
+        "Morning - Well Rested, Easy Task": {
+            # Activity
             'typing_speed_5min': 60, 'typing_speed_15min': 58,
             'error_rate_5min': 0.02, 'error_rate_15min': 0.025,
             'mouse_entropy': 0.8, 'idle_percentage': 0.1,
             'session_duration': 30, 'time_since_break': 15,
-            'tasks_completed_hour': 3, 'hour_of_day': 9,
-            'day_of_week': 1, 'sleep_quality': 9,
-            'stress_level': 2, 'caffeine_intake': 1,
+            'tasks_completed_hour': 3, 'hour_of_day': 9, 'day_of_week': 1,
+            'sleep_quality': 9, 'stress_level': 2, 'caffeine_intake': 1,
             'exercise_today': 1, 'expected_difficulty': 4,
             'typing_speed_ratio': 1.1, 'error_rate_ratio': 0.8,
+            # Break context
+            'velocity_5min': 58, 'velocity_15min': 56, 'velocity_trend': 1,
+            'deep_work_indicator': 1, 'task_switches_last_hour': 0,
+            'user_avg_session_length': 90, 'historical_acceptance_rate': 0.5,
+            'minutes_since_last_prompt': 60, 'last_prompt_accepted': 1,
+            'prompts_dismissed_streak': 0,
+            # Task context
+            'current_task_complexity': 0, 'current_task_duration': 15,
+            'current_task_progress': 0.3, 'current_task_error_rate': 0.02,
+            'task_is_stuck': 0, 'num_low_complexity_available': 3,
+            'num_high_complexity_available': 2, 'has_urgent_simple_task': 0,
+            'user_switch_frequency': 0.2, 'recent_task_switch': 0,
+            'task_has_dependencies': 0,
         },
-        "Afternoon - Moderate": {
-            'typing_speed_5min': 45, 'typing_speed_15min': 47,
-            'error_rate_5min': 0.05, 'error_rate_15min': 0.04,
-            'mouse_entropy': 0.6, 'idle_percentage': 0.2,
-            'session_duration': 120, 'time_since_break': 45,
-            'tasks_completed_hour': 2, 'hour_of_day': 14,
-            'day_of_week': 3, 'sleep_quality': 6,
-            'stress_level': 5, 'caffeine_intake': 2,
-            'exercise_today': 0, 'expected_difficulty': 6,
-            'typing_speed_ratio': 0.9, 'error_rate_ratio': 1.1,
+        "Long Session, Declining Energy": {
+            'typing_speed_5min': 38, 'typing_speed_15min': 42,
+            'error_rate_5min': 0.07, 'error_rate_15min': 0.06,
+            'mouse_entropy': 0.45, 'idle_percentage': 0.3,
+            'session_duration': 150, 'time_since_break': 75,
+            'tasks_completed_hour': 1, 'hour_of_day': 15, 'day_of_week': 3,
+            'sleep_quality': 5, 'stress_level': 7, 'caffeine_intake': 2,
+            'exercise_today': 0, 'expected_difficulty': 7,
+            'typing_speed_ratio': 0.75, 'error_rate_ratio': 1.6,
+            'velocity_5min': 32, 'velocity_15min': 38, 'velocity_trend': -1,
+            'deep_work_indicator': 0, 'task_switches_last_hour': 1,
+            'user_avg_session_length': 90, 'historical_acceptance_rate': 0.6,
+            'minutes_since_last_prompt': 40, 'last_prompt_accepted': 0,
+            'prompts_dismissed_streak': 1,
+            'current_task_complexity': 2, 'current_task_duration': 45,
+            'current_task_progress': 0.2, 'current_task_error_rate': 0.09,
+            'task_is_stuck': 1, 'num_low_complexity_available': 4,
+            'num_high_complexity_available': 1, 'has_urgent_simple_task': 1,
+            'user_switch_frequency': 0.3, 'recent_task_switch': 0,
+            'task_has_dependencies': 0,
         },
-        "Late Night - Exhausted": {
-            'typing_speed_5min': 30, 'typing_speed_15min': 35,
-            'error_rate_5min': 0.1, 'error_rate_15min': 0.08,
-            'mouse_entropy': 0.3, 'idle_percentage': 0.5,
-            'session_duration': 300, 'time_since_break': 80,
-            'tasks_completed_hour': 0, 'hour_of_day': 23,
-            'day_of_week': 5, 'sleep_quality': 4,
-            'stress_level': 8, 'caffeine_intake': 3,
-            'exercise_today': 0, 'expected_difficulty': 8,
-            'typing_speed_ratio': 0.6, 'error_rate_ratio': 2.0,
-        },
-        "Post-Break - Refreshed": {
+        "Post-Break, Fresh Start": {
             'typing_speed_5min': 55, 'typing_speed_15min': 50,
             'error_rate_5min': 0.03, 'error_rate_15min': 0.035,
             'mouse_entropy': 0.75, 'idle_percentage': 0.12,
             'session_duration': 5, 'time_since_break': 2,
-            'tasks_completed_hour': 2, 'hour_of_day': 11,
-            'day_of_week': 2, 'sleep_quality': 7,
-            'stress_level': 3, 'caffeine_intake': 1,
+            'tasks_completed_hour': 2, 'hour_of_day': 11, 'day_of_week': 2,
+            'sleep_quality': 7, 'stress_level': 3, 'caffeine_intake': 1,
             'exercise_today': 1, 'expected_difficulty': 5,
             'typing_speed_ratio': 1.05, 'error_rate_ratio': 0.9,
+            'velocity_5min': 52, 'velocity_15min': 48, 'velocity_trend': 1,
+            'deep_work_indicator': 0, 'task_switches_last_hour': 0,
+            'user_avg_session_length': 90, 'historical_acceptance_rate': 0.5,
+            'minutes_since_last_prompt': 90, 'last_prompt_accepted': 1,
+            'prompts_dismissed_streak': 0,
+            'current_task_complexity': 1, 'current_task_duration': 5,
+            'current_task_progress': 0.05, 'current_task_error_rate': 0.03,
+            'task_is_stuck': 0, 'num_low_complexity_available': 3,
+            'num_high_complexity_available': 2, 'has_urgent_simple_task': 0,
+            'user_switch_frequency': 0.2, 'recent_task_switch': 0,
+            'task_has_dependencies': 0,
         },
-        "Stressed & Sleep Deprived": {
-            'typing_speed_5min': 35, 'typing_speed_15min': 38,
-            'error_rate_5min': 0.08, 'error_rate_15min': 0.07,
-            'mouse_entropy': 0.4, 'idle_percentage': 0.35,
-            'session_duration': 180, 'time_since_break': 60,
-            'tasks_completed_hour': 1, 'hour_of_day': 16,
-            'day_of_week': 4, 'sleep_quality': 3,
-            'stress_level': 9, 'caffeine_intake': 3,
+        "Late Night, Exhausted, Hard Task": {
+            'typing_speed_5min': 28, 'typing_speed_15min': 32,
+            'error_rate_5min': 0.12, 'error_rate_15min': 0.1,
+            'mouse_entropy': 0.25, 'idle_percentage': 0.5,
+            'session_duration': 300, 'time_since_break': 90,
+            'tasks_completed_hour': 0, 'hour_of_day': 23, 'day_of_week': 5,
+            'sleep_quality': 3, 'stress_level': 9, 'caffeine_intake': 3,
             'exercise_today': 0, 'expected_difficulty': 9,
-            'typing_speed_ratio': 0.7, 'error_rate_ratio': 1.8,
+            'typing_speed_ratio': 0.55, 'error_rate_ratio': 2.2,
+            'velocity_5min': 20, 'velocity_15min': 25, 'velocity_trend': -1,
+            'deep_work_indicator': 0, 'task_switches_last_hour': 0,
+            'user_avg_session_length': 90, 'historical_acceptance_rate': 0.4,
+            'minutes_since_last_prompt': 50, 'last_prompt_accepted': 0,
+            'prompts_dismissed_streak': 3,
+            'current_task_complexity': 2, 'current_task_duration': 90,
+            'current_task_progress': 0.15, 'current_task_error_rate': 0.15,
+            'task_is_stuck': 1, 'num_low_complexity_available': 2,
+            'num_high_complexity_available': 0, 'has_urgent_simple_task': 1,
+            'user_switch_frequency': 0.1, 'recent_task_switch': 0,
+            'task_has_dependencies': 0,
+        },
+        "Deep Focus Flow State": {
+            'typing_speed_5min': 65, 'typing_speed_15min': 63,
+            'error_rate_5min': 0.015, 'error_rate_15min': 0.02,
+            'mouse_entropy': 0.85, 'idle_percentage': 0.05,
+            'session_duration': 60, 'time_since_break': 40,
+            'tasks_completed_hour': 4, 'hour_of_day': 10, 'day_of_week': 2,
+            'sleep_quality': 8, 'stress_level': 2, 'caffeine_intake': 1,
+            'exercise_today': 1, 'expected_difficulty': 7,
+            'typing_speed_ratio': 1.25, 'error_rate_ratio': 0.5,
+            'velocity_5min': 64, 'velocity_15min': 62, 'velocity_trend': 1,
+            'deep_work_indicator': 1, 'task_switches_last_hour': 0,
+            'user_avg_session_length': 120, 'historical_acceptance_rate': 0.3,
+            'minutes_since_last_prompt': 120, 'last_prompt_accepted': 0,
+            'prompts_dismissed_streak': 0,
+            'current_task_complexity': 2, 'current_task_duration': 45,
+            'current_task_progress': 0.6, 'current_task_error_rate': 0.02,
+            'task_is_stuck': 0, 'num_low_complexity_available': 2,
+            'num_high_complexity_available': 1, 'has_urgent_simple_task': 0,
+            'user_switch_frequency': 0.1, 'recent_task_switch': 0,
+            'task_has_dependencies': 0,
         },
     }
 
-    print(f"\n  {'Scenario':<30} {'Predicted Energy':>18}  {'Assessment'}")
-    print(f"  {'-'*30} {'-'*18}  {'-'*15}")
+    header = f"  {'Scenario':<35} {'Energy':>7} {'Break?':>7} {'Switch?':>8}"
+    print(f"\n{header}")
+    print(f"  {'-'*35} {'-'*7} {'-'*7} {'-'*8}")
 
     for name, features in scenarios.items():
-        score = predict_onnx(session, features)
-        score = max(0, min(100, score))
+        enriched = dict(features)
 
-        if score >= 70:
-            assessment = "HIGH energy"
-        elif score >= 40:
-            assessment = "MODERATE"
-        else:
-            assessment = "LOW energy"
+        # Step 1: Energy
+        energy = "--"
+        if energy_session:
+            score = predict_regressor(energy_session, enriched, ENERGY_FEATURE_NAMES)
+            score = max(0, min(100, score))
+            energy = f"{score:.0f}"
+            enriched['predicted_energy'] = score
 
-        bar_len = int(score / 5)
-        bar = "#" * bar_len + "." * (20 - bar_len)
+        # Step 2: Break
+        break_str = "--"
+        break_conf = 0
+        if break_session:
+            prob = predict_classifier(break_session, enriched, BREAK_FEATURE_NAMES)
+            break_conf = prob
+            break_str = f"{'YES' if prob >= 0.5 else 'no'} ({prob:.2f})"
+            enriched['break_suggestion_prob'] = prob
 
-        print(f"  {name:<30} {score:>10.1f} / 100   {assessment}")
-        print(f"  {'':30} [{bar}]")
+        # Step 3: Task Switch
+        switch_str = "--"
+        if switch_session:
+            prob = predict_classifier(switch_session, enriched, TASK_SWITCH_FEATURE_NAMES)
+            switch_str = f"{'YES' if prob >= 0.5 else 'no'} ({prob:.2f})"
+
+        print(f"  {name:<35} {energy:>7} {break_str:>12} {switch_str:>14}")
 
     print()
 
 
-def test_feature_sensitivity(session):
-    """Test how sensitive the model is to each feature."""
-    print("\n" + "=" * 60)
-    print("  FEATURE SENSITIVITY ANALYSIS")
-    print("=" * 60)
-
-    # Baseline: average values
-    baseline = {
-        'typing_speed_5min': 50, 'typing_speed_15min': 50,
-        'error_rate_5min': 0.05, 'error_rate_15min': 0.05,
-        'mouse_entropy': 0.6, 'idle_percentage': 0.2,
-        'session_duration': 60, 'time_since_break': 30,
-        'tasks_completed_hour': 2, 'hour_of_day': 12,
-        'day_of_week': 3, 'sleep_quality': 7,
-        'stress_level': 5, 'caffeine_intake': 1,
-        'exercise_today': 0, 'expected_difficulty': 5,
-        'typing_speed_ratio': 1.0, 'error_rate_ratio': 1.0,
-    }
-
-    baseline_score = predict_onnx(session, baseline)
-
-    # Test each feature: set to low vs high
-    feature_ranges = {
-        'typing_speed_5min': (20, 80),
-        'typing_speed_15min': (20, 80),
-        'error_rate_5min': (0.01, 0.15),
-        'error_rate_15min': (0.01, 0.15),
-        'mouse_entropy': (0.1, 0.9),
-        'idle_percentage': (0.05, 0.6),
-        'session_duration': (5, 300),
-        'time_since_break': (5, 90),
-        'tasks_completed_hour': (0, 5),
-        'hour_of_day': (6, 22),
-        'day_of_week': (0, 6),
-        'sleep_quality': (3, 9),
-        'stress_level': (1, 9),
-        'caffeine_intake': (0, 3),
-        'exercise_today': (0, 1),
-        'expected_difficulty': (2, 9),
-        'typing_speed_ratio': (0.5, 1.5),
-        'error_rate_ratio': (0.5, 2.5),
-    }
-
-    print(f"\n  Baseline prediction: {baseline_score:.1f}")
-    print(f"\n  {'Feature':<25} {'Low':>8} {'High':>8} {'Impact':>8}  Direction")
-    print(f"  {'-'*25} {'-'*8} {'-'*8} {'-'*8}  {'-'*20}")
-
-    impacts = []
-    for feature, (low, high) in feature_ranges.items():
-        # Test with low value
-        low_input = baseline.copy()
-        low_input[feature] = low
-        low_score = predict_onnx(session, low_input)
-
-        # Test with high value
-        high_input = baseline.copy()
-        high_input[feature] = high
-        high_score = predict_onnx(session, high_input)
-
-        impact = abs(high_score - low_score)
-        direction = "+" if high_score > low_score else "-"
-        direction_desc = "Higher = More energy" if high_score > low_score else "Higher = Less energy"
-
-        impacts.append((feature, low_score, high_score, impact, direction_desc))
-
-    # Sort by impact
-    impacts.sort(key=lambda x: x[3], reverse=True)
-
-    for feature, low_score, high_score, impact, direction in impacts:
-        marker = "***" if impact > 5 else "  *" if impact > 2 else "   "
-        print(f"  {feature:<25} {low_score:>7.1f} {high_score:>7.1f} {impact:>7.1f}  {direction} {marker}")
-
-    print(f"\n  *** = High impact (>5 pts)  * = Moderate (>2 pts)")
-
+# ==============================================================================
+# MAIN
+# ==============================================================================
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("  FlowState - Model Accuracy & Testing Suite")
+    print("  FlowState - Pipeline Model Testing Suite")
     print("=" * 60)
 
-    # Load model
-    model_path = os.path.join('models', 'energy-model.onnx')
-    session = load_onnx_model(model_path)
-    if not session:
+    # Load all models
+    print("\n  Loading models...")
+    energy_path = os.path.join('models', 'energy-model.onnx')
+    break_path = os.path.join('models', 'break-model.onnx')
+    switch_path = os.path.join('models', 'task-switch-model.onnx')
+
+    energy_session = load_onnx_model(energy_path, "Energy Model")
+    break_session = load_onnx_model(break_path, "Break Model")
+    switch_session = load_onnx_model(switch_path, "Task Switch Model")
+
+    if not energy_session:
+        print("\n  [ERROR] Energy model is required. Train models first!")
+        print("  Run: python export_onnx.py")
         sys.exit(1)
 
-    # --- Test 1: Accuracy on unseen data ---
-    print("\n  Generating unseen test data (different seed)...")
-    np.random.seed(99)  # Different seed than training (42)
+    # Generate unseen test data (different seed)
+    print("\n  Generating unseen test data (seed=99)...")
+    np.random.seed(99)
     test_data = generate_dummy_data(num_days=3, samples_per_day=24)
-    test_accuracy(session, test_data)
 
-    # --- Test 2: Scenario predictions ---
-    test_scenarios(session)
+    # Test 1: Energy accuracy
+    test_energy_accuracy(energy_session, test_data)
 
-    # --- Test 3: Feature sensitivity ---
-    test_feature_sensitivity(session)
+    # Test 2: Break model accuracy
+    if break_session:
+        test_break_accuracy(break_session, test_data)
+    else:
+        print(f"\n  [SKIP] Break model not found")
 
-    print("\n" + "=" * 60)
+    # Test 3: Task switch accuracy
+    if switch_session:
+        test_task_switch_accuracy(switch_session, test_data)
+    else:
+        print(f"\n  [SKIP] Task switch model not found")
+
+    # Test 4: Pipeline scenarios
+    test_pipeline_scenarios(energy_session, break_session, switch_session)
+
+    print("=" * 60)
     print("  Testing complete!")
     print("=" * 60)
