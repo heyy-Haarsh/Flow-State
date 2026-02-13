@@ -111,6 +111,21 @@ function runMigrations(db) {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+
+    -- Peak Analysis Results (Maintained by PeakDetector)
+    CREATE TABLE IF NOT EXISTS peak_analysis_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      analysis_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      context TEXT CHECK(context IN ('weekday', 'weekend')),
+      hour_of_day INTEGER,
+      is_peak BOOLEAN,
+      peak_score REAL,
+      performance_score REAL,
+      consistency_score REAL,
+      sustainability_score REAL,
+      confidence_level REAL,
+      window_group_id INTEGER
+    );
   `);
 
     // Insert default settings if not present

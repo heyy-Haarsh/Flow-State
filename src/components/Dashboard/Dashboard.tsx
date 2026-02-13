@@ -2,6 +2,7 @@ import EnergyGauge from './EnergyGauge';
 import QuickStats from './QuickStats';
 import TaskQueue from './TaskQueue';
 import SuggestedTasks from './SuggestedTasks';
+import PeakHoursWidget from './PeakHoursWidget';
 import Card from '@/components/UI/Card';
 import { useFlowStateStore } from '@/stores/flowstate-store';
 import { getEnergyColor } from '@/utils/constants';
@@ -39,23 +40,7 @@ export default function Dashboard() {
                     <QuickStats />
 
                     {/* Peak Hours Insight */}
-                    {baseline.peakHours && baseline.peakHours.length > 0 && (
-                        <Card className="mt-3" padding="sm">
-                            <div className="flex items-center gap-2 text-xs">
-                                <Target size={14} className="text-amber-400" />
-                                <span className="text-dark-400">
-                                    Peak hours:{' '}
-                                    <span className="text-dark-200 font-medium">
-                                        {baseline.peakHours.map((h) => {
-                                            const ampm = h >= 12 ? 'PM' : 'AM';
-                                            const hour12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
-                                            return `${hour12}${ampm}`;
-                                        }).join(', ')}
-                                    </span>
-                                </span>
-                            </div>
-                        </Card>
-                    )}
+                    <PeakHoursWidget />
                 </div>
             </div>
 

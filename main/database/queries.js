@@ -250,6 +250,55 @@ const cleanupOldData = (retentionDays) => {
     DELETE FROM metrics_hourly
     WHERE hour_start < datetime('now', '-${retentionDays} days')
   `).run();
+
+  // Keep only the latest analysis per context/hour
+  db.prepare(`
+    DELETE FROM peak_analysis_results
+    WHERE id NOT IN (
+      SELECT id FROM peak_analysis_results
+      ORDER BY analysis_date DESC
+      LIMIT 100 -- Keep last ~2 full analyses (48 hours * 2)
+    )
+  `).run();
+};
+
+// ============ PEAK ANALYSIS ============
+
+const savePeakAnalysisResult = (result) => {
+  const db = getDatabase();
+  return db.prepare(`
+    INSERT INTO peak_analysis_results (
+      context, hour_of_day, is_peak, peak_score,
+      performance_score, consistency_score, sustainability_score,
+      confidence_level, window_group_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    result.context, result.hourOfDay, result.isPeak ? 1 : 0, result.peakScore,
+    result.performanceScore, result.consistencyScore, result.sustainabilityScore,
+    result.confidenceLevel, result.windowGroupId
+  );
+};
+
+const getPeakAnalysisResults = (context) => {
+  const db = getDatabase();
+  // Get the most recent analysis for each hour in the given context
+  return db.prepare(`
+    SELECT * FROM peak_analysis_results
+    WHERE context = ?
+    AND analysis_date = (
+        SELECT analysis_date FROM peak_analysis_results 
+        WHERE context = ? 
+        ORDER BY analysis_date DESC 
+        LIMIT 1
+    )
+    ORDER BY hour_of_day ASC
+  `).all(context, context);
+};
+
+// Clear previous results for a fresh run
+const clearPeakAnalysisResults = (context) => {
+  const db = getDatabase();
+  return db.prepare('DELETE FROM peak_analysis_results WHERE context = ?').run(context);
 };
 
 module.exports = {
@@ -275,4 +324,7 @@ module.exports = {
   getAllSettings,
   cleanupOldData,
   getCompletedTasksCount,
+  savePeakAnalysisResult,
+  getPeakAnalysisResults,
+  clearPeakAnalysisResults,
 };

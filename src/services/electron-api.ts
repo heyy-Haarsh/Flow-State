@@ -52,6 +52,16 @@ export const electronAPI = {
     },
 
     // ---- ML ----
+    analyzePeakHours: async () => {
+        if (isElectron) return window.electron.analyzePeakHours();
+        console.log('[Mock] analyzePeakHours');
+    },
+
+    getPeakAnalysis: async (context: string) => {
+        if (isElectron) return window.electron.getPeakAnalysis(context);
+        return [];
+    },
+
     triggerModelTraining: async () => {
         if (isElectron) return window.electron.triggerModelTraining();
         console.log('[Mock] triggerModelTraining');
@@ -105,6 +115,8 @@ declare global {
             getAnalytics: (range: number) => Promise<any>;
             getDailySummary: (date: string) => Promise<any>;
             getWeeklySummary: () => Promise<any>;
+            analyzePeakHours: () => Promise<any>;
+            getPeakAnalysis: (context: string) => Promise<any>;
             triggerModelTraining: () => Promise<any>;
             getModelStatus: () => Promise<any>;
             getSettings: () => Promise<any>;

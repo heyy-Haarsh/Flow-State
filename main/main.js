@@ -4,6 +4,7 @@ const db = require('./database/index');
 const queries = require('./database/queries');
 const mlPipeline = require('./services/ml-inference');
 const interventionEngine = require('./services/intervention-engine');
+const PeakDetector = require('./services/peak-detector');
 const { extractCurrentFeatures, recordInterventionResponse, recordTaskSwitch, resetTracking } = require('./ml/feature-extractor');
 const activityAggregator = require('./monitoring/activity-aggregator');
 const globalInputHook = require('./monitoring/global-input-hook');
@@ -201,9 +202,9 @@ function createWindow() {
     !require('fs').existsSync(path.join(__dirname, '../dist/index.html'));
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:5175');
     mainWindow.webContents.openDevTools();
-    console.log('[Main] Loading from Vite dev server (http://localhost:5173)');
+    console.log('[Main] Loading from Vite dev server (http://localhost:5175)');
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
@@ -360,6 +361,22 @@ ipcMain.handle('delete-all-data', () => {
 // Analytics
 ipcMain.handle('get-analytics', (_, range) => {
   return queries.getHourlyMetrics(range || 24);
+});
+
+// Peak Hours Analysis
+ipcMain.handle('analyze-peak-hours', async () => {
+  try {
+    const detector = new PeakDetector();
+    const result = await detector.runAnalysis();
+    return result;
+  } catch (err) {
+    console.error('[Main] Peak analysis failed:', err);
+    return { status: 'error', message: err.message };
+  }
+});
+
+ipcMain.handle('get-peak-analysis', (_, context) => { // context = 'weekday' or 'weekend'
+  return queries.getPeakAnalysisResults(context || 'weekday');
 });
 
 ipcMain.handle('get-daily-summary', (_, date) => {

@@ -64,6 +64,18 @@ export interface UserBaseline {
     lastUpdated: string;
 }
 
+export interface PeakAnalysisResult {
+    context: 'weekday' | 'weekend';
+    hourOfDay: number;
+    isPeak: boolean;
+    peakScore: number;
+    performanceScore: number;
+    consistencyScore: number;
+    sustainabilityScore: number;
+    confidenceLevel: number;
+    windowGroupId: number | null;
+}
+
 // ---- Questionnaire Responses ----
 
 export interface MorningCheckinResponse {
@@ -221,4 +233,8 @@ export interface FlowStateStore {
     deleteTask: (id: string) => void;
     startTask: (id: string) => void;
     completeTask: (id: string) => void;
+
+    // Peak Analysis
+    peakAnalysis: PeakAnalysisResult[];
+    fetchPeakHours: () => Promise<void>;
 }

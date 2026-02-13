@@ -6,7 +6,8 @@
 // ============================================
 
 import { create } from 'zustand';
-import type { FlowStateStore, Task, UserBaseline, CognitiveState } from '@/types/flowstate';
+import type { FlowStateStore, Task, UserBaseline, CognitiveState, PeakAnalysisResult } from '@/types/flowstate';
+import { electronAPI } from '@/services/electron-api';
 import {
     calculateEnergyScore,
     calculateErrorRate,
@@ -217,5 +218,35 @@ export const useFlowStateStore = create<FlowStateStore>((set, get) => ({
                     : t
             ),
         }));
+    },
+
+    // ---- Peak Analysis ----
+    peakAnalysis: [],
+
+    fetchPeakHours: async () => {
+        try {
+            // Default to 'weekday' for now, or detect based on today
+            const isWeekend = new Date().getDay() === 0 || new Date().getDay() === 6;
+            const context = isWeekend ? 'weekend' : 'weekday';
+
+            const results: PeakAnalysisResult[] = await electronAPI.getPeakAnalysis(context);
+
+            if (results && results.length > 0) {
+                // Update state
+                set({ peakAnalysis: results });
+
+                // Also update baseline.peakHours for backward compatibility
+                const simplePeaks = results.filter(r => r.isPeak).map(r => r.hourOfDay);
+
+                set(state => ({
+                    baseline: {
+                        ...state.baseline,
+                        peakHours: simplePeaks
+                    }
+                }));
+            }
+        } catch (err) {
+            console.error('Failed to fetch peak analysis:', err);
+        }
     },
 }));
