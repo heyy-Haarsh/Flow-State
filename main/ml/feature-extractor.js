@@ -105,13 +105,19 @@ function extractCurrentFeatures(sessionContext = {}) {
 
     const now = new Date();
     const typingSpeedRatio = baseline.baseline_typing_speed > 0
-        ? typingSpeed5 / baseline.baseline_typing_speed : 1;
+        ? Math.min(typingSpeed5 / baseline.baseline_typing_speed, 3.0) : 1;
     const errorRateRatio = baseline.baseline_error_rate > 0
-        ? errorRate5 / baseline.baseline_error_rate : 1;
+        ? Math.min(errorRate5 / baseline.baseline_error_rate, 3.0) : 1;
 
-    // --- Velocity calculations ---
-    const velocity5 = typingSpeed5 * (1 - errorRate5 * 5);
-    const velocity15 = typingSpeed15 * (1 - errorRate15 * 3);
+    // Cap error rates: the model was trained on error rates 0-0.15.
+    // Backspace-heavy editing can spike this to 0.8+, which is WAY
+    // outside the training distribution and causes garbage predictions.
+    const cappedErrorRate5 = Math.min(errorRate5, 0.3);
+    const cappedErrorRate15 = Math.min(errorRate15, 0.3);
+
+    // --- Velocity calculations (use capped error rates) ---
+    const velocity5 = typingSpeed5 * (1 - cappedErrorRate5 * 5);
+    const velocity15 = typingSpeed15 * (1 - cappedErrorRate15 * 3);
 
     velocityHistory.push(velocity15);
     if (velocityHistory.length > 10) velocityHistory.shift();
@@ -156,8 +162,8 @@ function extractCurrentFeatures(sessionContext = {}) {
         // === Energy Model Features ===
         typing_speed_5min: typingSpeed5,
         typing_speed_15min: typingSpeed15,
-        error_rate_5min: errorRate5,
-        error_rate_15min: errorRate15,
+        error_rate_5min: cappedErrorRate5,
+        error_rate_15min: cappedErrorRate15,
         mouse_entropy: mouseEntropy,
         idle_percentage: idlePercentage,
         session_duration: sessionContext.sessionDuration || 0,

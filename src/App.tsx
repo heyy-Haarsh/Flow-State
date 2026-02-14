@@ -15,11 +15,7 @@ import FocusPage from '@/components/FocusSessions/FocusPage';
 
 import { useState, useEffect } from 'react';
 
-declare global {
-    interface Window {
-        electron: any;
-    }
-}
+
 
 function App() {
     // Start activity tracking
@@ -30,10 +26,36 @@ function App() {
     const cognitiveState = useFlowStateStore((s) => s.cognitiveState);
     const settings = useFlowStateStore((s) => s.settings);
 
+    const setMLEnergy = useFlowStateStore((s) => s.setMLEnergy);
+
     // Intervention state
     const [showBreakSuggestion, setShowBreakSuggestion] = useState(false);
     const [showFlowAlert, setShowFlowAlert] = useState(false);
     const [flowAlertDismissed, setFlowAlertDismissed] = useState(false);
+    const [breakRecommendation, setBreakRecommendation] = useState<any>(null);
+
+    // ---- Wire ML Energy Pipeline into the UI Store ----
+    // The Electron main process runs the ML model every 60s and sends
+    // a smoothed energy score via IPC. We push it into the Zustand store
+    // so ALL components (Dashboard, Header, EnergyGauge, etc.) show it.
+    useEffect(() => {
+        // 1. Listen for ongoing ML energy updates (every 60s)
+        if (window.electron?.onEnergyUpdate) {
+            window.electron.onEnergyUpdate((score: number) => {
+                setMLEnergy(score);
+            });
+        }
+
+        // 2. Fetch initial ML energy immediately on mount
+        //    (don't wait 60s for the first pipeline cycle)
+        if (window.electron?.getEnergyScore) {
+            window.electron.getEnergyScore().then((score: number) => {
+                if (typeof score === 'number' && score > 0) {
+                    setMLEnergy(score);
+                }
+            });
+        }
+    }, [setMLEnergy]);
 
     // Show break suggestion when energy drops below 40 and break reminder is enabled
     useEffect(() => {
@@ -63,6 +85,21 @@ function App() {
             window.electron.onTriggerBreak(() => {
                 setShowBreakSuggestion(true);
                 setActiveTab('dashboard');
+            });
+        }
+
+        // Listen for ML-powered intervention events from the backend
+        if (window.electron?.onIntervention) {
+            window.electron.onIntervention((intervention: any) => {
+                if (intervention.type === 'break_suggestion' ||
+                    intervention.type === 'mandatory_break' ||
+                    intervention.type === 'critical_energy') {
+                    // Extract the break type recommendation
+                    if (intervention.breakRecommendation) {
+                        setBreakRecommendation(intervention.breakRecommendation);
+                    }
+                    setShowBreakSuggestion(true);
+                }
             });
         }
     }, [setActiveTab]);
@@ -114,7 +151,10 @@ function App() {
 
                     {showBreakSuggestion && activeTab === 'dashboard' && (
                         <div className="mb-4">
-                            <BreakSuggestion onDismiss={() => setShowBreakSuggestion(false)} />
+                            <BreakSuggestion
+                                onDismiss={() => { setShowBreakSuggestion(false); setBreakRecommendation(null); }}
+                                recommendation={breakRecommendation}
+                            />
                         </div>
                     )}
 

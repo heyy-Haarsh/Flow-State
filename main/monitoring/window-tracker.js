@@ -4,7 +4,8 @@
 //
 // PRIVACY: We store app names and usage duration, but NOT window titles.
 
-const activeWin = require('active-win');
+// active-win is ESM, so we import it dynamically in start()
+let activeWin = null;
 const queries = require('../database/queries');
 
 // Default app categorizations
@@ -82,6 +83,16 @@ class WindowTracker {
     // Initialize default categories if needed
     await this.initializeCategories();
 
+    // Dynamically load active-win (ESM module) if not already loaded
+    if (!activeWin) {
+      try {
+        const module = await import('active-win');
+        activeWin = module.default;
+      } catch (err) {
+        console.error('[WindowTracker] Failed to load active-win:', err);
+      }
+    }
+
     // Start polling every 5 seconds
     this.pollInterval = setInterval(() => {
       this.checkActiveWindow();
@@ -116,6 +127,7 @@ class WindowTracker {
    */
   async checkActiveWindow() {
     try {
+      if (!activeWin) return; // Not loaded yet
       const window = await activeWin();
 
       if (!window) {

@@ -26,8 +26,8 @@ const DEFAULT_BASELINE: UserBaseline = {
 };
 
 const DEFAULT_COGNITIVE_STATE: CognitiveState = {
-    energyScore: 70,
-    energyLevel: 'good',
+    energyScore: 55,
+    energyLevel: 'low',
     workVelocity: 0,
     errorRate: 0,
     typingSpeed: 0,
@@ -40,6 +40,7 @@ const DEFAULT_COGNITIVE_STATE: CognitiveState = {
 export const useFlowStateStore = create<FlowStateStore>((set, get) => ({
     // ---- Cognitive State ----
     cognitiveState: { ...DEFAULT_COGNITIVE_STATE },
+    _mlEnergyActive: false,  // true once ML pipeline has sent at least one score
 
     // ---- Raw Tracking Counters ----
     keystrokeTimestamps: [],
@@ -146,8 +147,10 @@ export const useFlowStateStore = create<FlowStateStore>((set, get) => ({
         const isInFlowState = workVelocity > 0.9 && errorRate < 2;
 
         const cognitiveState: CognitiveState = {
-            energyScore,
-            energyLevel: getEnergyLevel(energyScore),
+            // If ML energy is active, keep the ML-provided score;
+            // otherwise use the frontend rule-based calculation.
+            energyScore: get()._mlEnergyActive ? get().cognitiveState.energyScore : energyScore,
+            energyLevel: get()._mlEnergyActive ? get().cognitiveState.energyLevel : getEnergyLevel(energyScore),
             workVelocity,
             errorRate,
             typingSpeed,
@@ -158,6 +161,23 @@ export const useFlowStateStore = create<FlowStateStore>((set, get) => ({
         };
 
         set({ cognitiveState });
+    },
+
+    // Override energy score with ML pipeline value
+    // This is called when the Electron main process sends a smoothed
+    // ML-predicted energy score. It overrides the frontend rule-based score.
+    setMLEnergy: (score: number) => {
+        set((state) => ({
+            _mlEnergyActive: true,
+            cognitiveState: {
+                ...state.cognitiveState,
+                energyScore: score,
+                energyLevel:
+                    score >= 80 ? 'peak' :
+                        score >= 60 ? 'good' :
+                            score >= 40 ? 'low' : 'critical',
+            },
+        }));
     },
 
     setBaseline: (baseline: UserBaseline) => {

@@ -188,6 +188,7 @@ export interface MLFeatures {
 export interface FlowStateStore {
     // Cognitive state
     cognitiveState: CognitiveState;
+    _mlEnergyActive: boolean;
 
     // Activity tracking (raw counters)
     keystrokeTimestamps: number[];
@@ -213,6 +214,7 @@ export interface FlowStateStore {
     recordContextSwitch: () => void;
     recordIdle: (idle: boolean) => void;
     updateMetrics: () => void;
+    setMLEnergy: (score: number) => void;
     setBaseline: (baseline: UserBaseline) => void;
 
     // Task actions
