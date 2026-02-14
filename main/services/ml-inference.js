@@ -67,6 +67,15 @@ class MLPipeline {
         // Model thresholds (from training metadata, fallback to reasonable defaults)
         this.breakThreshold = 0.5;
         this.switchThreshold = 0.5;
+
+        // ── Energy Score Smoothing ──
+        // Prevents drastic energy swings (e.g., 72→12 when you stop typing).
+        // Uses EMA + max-delta clamping for natural transitions.
+        this._smoothedEnergy = null;       // null = uninitialized (first prediction seeds it)
+        this._energyEmaAlpha = 0.25;       // Blend factor: lower = smoother (responds in ~4 cycles)
+        this._maxEnergyDelta = 5;          // Max ±5 points change per update cycle (60s)
+        this._lastPredictionTime = Date.now(); // Initialize to NOW, not epoch 0
+        this._predictionCount = 0;         // Track how many predictions we've made
     }
 
     // ========================================================================
@@ -96,7 +105,7 @@ class MLPipeline {
             try {
                 this.energySession = await ort.InferenceSession.create(energyPath);
                 this.loaded.energy = true;
-                console.log('[MLPipeline] ✓ Energy model loaded');
+                console.log(`[MLPipeline] ✓ Energy model loaded from: ${energyPath}`);
             } catch (err) {
                 console.warn('[MLPipeline] ✗ Energy model failed:', err.message);
             }
@@ -108,7 +117,7 @@ class MLPipeline {
             try {
                 this.breakSession = await ort.InferenceSession.create(breakPath);
                 this.loaded.break = true;
-                console.log('[MLPipeline] ✓ Break model loaded');
+                console.log(`[MLPipeline] ✓ Break model loaded from: ${breakPath}, outputs: ${this.breakSession.outputNames}`);
             } catch (err) {
                 console.warn('[MLPipeline] ✗ Break model failed:', err.message);
             }
@@ -120,7 +129,7 @@ class MLPipeline {
             try {
                 this.switchSession = await ort.InferenceSession.create(switchPath);
                 this.loaded.taskSwitch = true;
-                console.log('[MLPipeline] ✓ Task switch model loaded');
+                console.log(`[MLPipeline] ✓ Task switch model loaded from: ${switchPath}, outputs: ${this.switchSession.outputNames}`);
             } catch (err) {
                 console.warn('[MLPipeline] ✗ Task switch model failed:', err.message);
             }
@@ -188,6 +197,13 @@ class MLPipeline {
 
     /**
      * Run ONNX classifier prediction.
+     * 
+     * LightGBM classifiers (exported with zipmap=False) output two tensors:
+     *   [0] = predicted label (int64, shape [1])
+     *   [1] = class probabilities (float32, shape [1, 2])
+     * 
+     * We want the probability of the positive class (index 1 of the second output).
+     * 
      * @returns {number|null} Probability of positive class (0.0 - 1.0)
      */
     async _predictClassifier(session, features, featureOrder) {
@@ -204,13 +220,25 @@ class MLPipeline {
             const tensor = new ort.Tensor('float32', inputArray, [1, featureOrder.length]);
             const results = await session.run({ float_input: tensor });
 
-            // LightGBM classifiers output probabilities in different ways:
-            // Try label output first, then check shape
-            const output = Object.values(results)[0];
-            const data = Array.from(output.data);
+            // Get all output tensors
+            const outputs = Object.values(results);
 
+            // With zipmap=False, LightGBM classifiers output:
+            //   outputs[0] = labels (int64)
+            //   outputs[1] = probabilities (float32, shape [1, 2])
+            if (outputs.length >= 2) {
+                const probabilities = Array.from(outputs[1].data);
+                // probabilities = [prob_class0, prob_class1]
+                // We want prob_class1 (probability of positive class)
+                if (probabilities.length >= 2) {
+                    return probabilities[1];
+                }
+                return probabilities[0];
+            }
+
+            // Fallback: single output (older format)
+            const data = Array.from(outputs[0].data);
             if (data.length >= 2) {
-                // [prob_class0, prob_class1]
                 return data[1];
             }
             return data[0];
@@ -250,24 +278,29 @@ class MLPipeline {
         // Make a mutable copy of features (pipeline enriches it as it goes)
         const enriched = { ...features };
 
-        // ---- Step 1: Energy Prediction ----
+        // ---- Step 1: Energy Prediction (with output smoothing) ----
         if (this.loaded.energy) {
             const rawScore = await this._predictRegressor(
                 this.energySession, enriched, ENERGY_FEATURE_ORDER
             );
             if (rawScore !== null) {
-                const score = Math.round(Math.max(0, Math.min(100, rawScore)));
-                result.energyScore = score;
-                result.energyLevel = this._getEnergyLevel(score);
-                enriched.predicted_energy = score;  // Feed to break model
+                const clampedRaw = Math.max(0, Math.min(100, rawScore));
+                const smoothed = this._smoothEnergyScore(clampedRaw);
+                result.energyScore = smoothed;
+                result.energyLevel = this._getEnergyLevel(smoothed);
+                enriched.predicted_energy = smoothed;  // Feed to break model
                 result.modelsUsed.energy = true;
-                result.reasoning.energy = `Energy at ${score} (${result.energyLevel})`;
+                result.reasoning.energy = `Energy at ${smoothed} (${result.energyLevel}) [raw: ${Math.round(clampedRaw)}]`;
+                console.log(`[MLPipeline] ✓ Energy: ML raw=${clampedRaw.toFixed(1)}, smoothed=${smoothed} (using ML model)`);
+            } else {
+                // Energy model failed — use neutral fallback
+                enriched.predicted_energy = 50;
+                console.log(`[MLPipeline] ⚠ Energy: ML failed, using neutral=50`);
             }
-        }
-
-        // Fallback: if energy model failed, use 50 as neutral
-        if (enriched.predicted_energy === undefined || enriched.predicted_energy === 50) {
-            enriched.predicted_energy = enriched.predicted_energy || 50;
+        } else {
+            // Energy model not loaded — use neutral fallback
+            enriched.predicted_energy = 50;
+            console.log(`[MLPipeline] ⚠ Energy: ML not loaded, using neutral=50`);
         }
 
         // ---- Step 2: Break Suggestion ----
@@ -281,14 +314,24 @@ class MLPipeline {
                 enriched.break_suggestion_prob = breakProba;  // Feed to task switch model
                 result.modelsUsed.break = true;
 
+                console.log(`[MLPipeline] ✓ Break: ML prob=${(breakProba * 100).toFixed(1)}%, threshold=${(this.breakThreshold * 100).toFixed(1)}% → ${result.shouldSuggestBreak ? 'SUGGEST' : 'NO'}`);
+
                 if (result.shouldSuggestBreak) {
                     result.reasoning.break = `Break recommended (confidence: ${(breakProba * 100).toFixed(0)}%)`;
                 } else {
                     result.reasoning.break = `No break needed (confidence: ${((1 - breakProba) * 100).toFixed(0)}%)`;
                 }
+            } else {
+                // ML inference failed — fall back to rules
+                console.log(`[MLPipeline] ⚠ Break: ML failed, using rule-based fallback`);
+                const breakFallback = this._ruleBasedBreakSuggestion(enriched);
+                result.shouldSuggestBreak = breakFallback.shouldSuggest;
+                result.breakConfidence = breakFallback.confidence;
+                enriched.break_suggestion_prob = breakFallback.confidence;
+                result.reasoning.break = breakFallback.reason;
             }
         } else {
-            // Rule-based fallback for break suggestion
+            // Model not loaded at all — fall back to rules
             const breakFallback = this._ruleBasedBreakSuggestion(enriched);
             result.shouldSuggestBreak = breakFallback.shouldSuggest;
             result.breakConfidence = breakFallback.confidence;
@@ -306,14 +349,23 @@ class MLPipeline {
                 result.shouldSuggestSwitch = switchProba >= this.switchThreshold;
                 result.modelsUsed.taskSwitch = true;
 
+                console.log(`[MLPipeline] ✓ TaskSwitch: ML prob=${(switchProba * 100).toFixed(1)}%, threshold=${(this.switchThreshold * 100).toFixed(1)}% → ${result.shouldSuggestSwitch ? 'SUGGEST' : 'NO'}`);
+
                 if (result.shouldSuggestSwitch) {
                     result.reasoning.taskSwitch = `Task switch recommended (confidence: ${(switchProba * 100).toFixed(0)}%)`;
                 } else {
                     result.reasoning.taskSwitch = `Continue current task`;
                 }
+            } else {
+                // ML inference failed — fall back to rules
+                console.log(`[MLPipeline] ⚠ TaskSwitch: ML failed, using rule-based fallback`);
+                const switchFallback = this._ruleBasedTaskSwitch(enriched);
+                result.shouldSuggestSwitch = switchFallback.shouldSuggest;
+                result.switchConfidence = switchFallback.confidence;
+                result.reasoning.taskSwitch = switchFallback.reason;
             }
         } else {
-            // Rule-based fallback
+            // Model not loaded at all — fall back to rules
             const switchFallback = this._ruleBasedTaskSwitch(enriched);
             result.shouldSuggestSwitch = switchFallback.shouldSuggest;
             result.switchConfidence = switchFallback.confidence;
@@ -402,6 +454,79 @@ class MLPipeline {
                 ? 'Consider switching to a simpler task (rule-based)'
                 : 'Continue current task (rule-based)',
         };
+    }
+
+    // ========================================================================
+    // ENERGY SCORE SMOOTHING
+    // ========================================================================
+
+    /**
+     * Smooth the raw energy score using EMA + max-delta clamping.
+     * 
+     * Without this, the energy jumps wildly:
+     *   Typing fast → 72,  Stop typing → 12  (Δ = 60 in one cycle!)
+     * 
+     * With smoothing:
+     *   Typing fast → 72,  Stop typing → 64 → 58 → 53 → ...  (gradual)
+     * 
+     * @param {number} rawScore - Raw model output (0-100)
+     * @returns {number} Smoothed energy score
+     */
+    _smoothEnergyScore(rawScore) {
+        const now = Date.now();
+        this._predictionCount++;
+
+        // First prediction: seed at a reasonable starting point.
+        // Don't blindly trust the first raw model output — at app startup
+        // there's almost no activity data, so the model output is unreliable.
+        // Start at a moderate "assumed decent" energy (55) and let the model
+        // gradually adjust from there based on real data.
+        if (this._smoothedEnergy === null) {
+            // Anchor at 55 (moderate energy) — will be pulled toward
+            // the real value over the next few cycles
+            const initialAnchor = 55;
+            this._smoothedEnergy = initialAnchor;
+            this._lastPredictionTime = now;
+            console.log(`[MLPipeline] Energy initialized at ${initialAnchor} (raw model wanted: ${Math.round(rawScore)})`);
+            return initialAnchor;
+        }
+
+        // For the first ~3 predictions, use very tight clamping.
+        // The model needs a few cycles of data before its output is reliable.
+        const isWarmingUp = this._predictionCount <= 3;
+
+        // Time-adaptive alpha
+        const elapsedSec = Math.max(1, (now - this._lastPredictionTime) / 1000);
+        this._lastPredictionTime = now;
+
+        // Scale alpha: normal at 60s interval, slightly more responsive at 120s+
+        // Cap at 1.5x to prevent huge swings after long gaps
+        const timeScale = Math.min(elapsedSec / 60, 1.5);
+        const alpha = isWarmingUp ? 0.15 : Math.min(this._energyEmaAlpha * timeScale, 0.5);
+
+        // Step 1: Apply EMA blending
+        let blended = alpha * rawScore + (1 - alpha) * this._smoothedEnergy;
+
+        // Step 2: Clamp the maximum change per cycle
+        const maxDelta = isWarmingUp ? 3 : this._maxEnergyDelta * timeScale;
+        const delta = blended - this._smoothedEnergy;
+
+        if (Math.abs(delta) > maxDelta) {
+            blended = this._smoothedEnergy + Math.sign(delta) * maxDelta;
+        }
+
+        // Step 3: Energy floor — never drop below 20 unless raw model
+        // has been consistently pushing below 20 for many cycles
+        if (blended < 20 && rawScore >= 15) {
+            blended = Math.max(blended, 20);
+        }
+
+        // Store and return
+        this._smoothedEnergy = Math.max(0, Math.min(100, blended));
+
+        console.log(`[MLPipeline] Energy: raw=${Math.round(rawScore)}, smoothed=${Math.round(this._smoothedEnergy)}, delta=${delta.toFixed(1)}, maxDelta=${maxDelta.toFixed(1)}`);
+
+        return Math.round(this._smoothedEnergy);
     }
 
     // ========================================================================

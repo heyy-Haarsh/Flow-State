@@ -34,10 +34,17 @@ def export_to_onnx(model, feature_names, output_path):
         ('float_input', FloatTensorType([None, num_features]))
     ]
 
+    # For classifiers: disable ZipMap operator.
+    # ZipMap converts probability tensors into a sequence of maps,
+    # which onnxruntime-node (Node.js) does NOT support.
+    # With zipmap=False, classifiers output raw float32 probability tensors.
+    is_classifier = hasattr(model, 'predict_proba')
+
     onnx_model = onnxmltools.convert_lightgbm(
         model,
         initial_types=initial_types,
-        target_opset=12
+        target_opset=12,
+        zipmap=not is_classifier  # False for classifiers, True doesn't matter for regressors
     )
 
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
@@ -45,7 +52,8 @@ def export_to_onnx(model, feature_names, output_path):
         f.write(onnx_model.SerializeToString())
 
     file_size = os.path.getsize(output_path)
-    print(f"[ONNX Export] Saved: {output_path} ({file_size / 1024:.1f} KB)")
+    model_type = "Classifier" if is_classifier else "Regressor"
+    print(f"[ONNX Export] Saved: {output_path} ({file_size / 1024:.1f} KB) [{model_type}]")
 
     validate_onnx_model(output_path, num_features)
     return output_path

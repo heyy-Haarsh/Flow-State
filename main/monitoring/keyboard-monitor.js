@@ -18,6 +18,15 @@ class KeyboardMonitor {
         this.isRunning = false;
         this.intervalId = null;
 
+        // EMA-smoothed metrics (survive across flush cycles)
+        // These provide stable, gradually-changing values instead of
+        // raw snapshots that swing wildly (e.g., 180→0 when you stop typing).
+        this._smoothedTypingSpeed = 0;
+        this._smoothedErrorRate = 0;
+        this._emaAlpha = 0.3;  // Higher = more reactive, Lower = smoother
+        this._lastActivityTime = Date.now();
+        this._idleDecayStarted = false;
+
         // Bind handler so we can remove it later
         this._boundKeyDown = this._handleKeyDown.bind(this);
     }
@@ -90,26 +99,51 @@ class KeyboardMonitor {
         const elapsedMs = Date.now() - this.startTime;
         const elapsedMin = elapsedMs / 60000;
 
-        // Skip if almost no time has passed or no keystrokes
-        if (elapsedMin < 0.1 || this.keystrokeCount === 0) return;
+        // Calculate raw metrics for this interval
+        let rawTypingSpeed = 0;
+        let rawErrorRate = 0;
 
-        const typingSpeed = Math.round(this.keystrokeCount / elapsedMin);
-        const totalErrors = this.backspaceCount + this.deleteCount;
-        const errorRate =
-            this.keystrokeCount > 0
-                ? +(totalErrors / this.keystrokeCount).toFixed(4)
-                : 0;
+        if (elapsedMin >= 0.1 && this.keystrokeCount > 0) {
+            rawTypingSpeed = Math.round(this.keystrokeCount / elapsedMin);
+            const totalErrors = this.backspaceCount + this.deleteCount;
+            rawErrorRate = +(totalErrors / this.keystrokeCount).toFixed(4);
+        }
 
-        // Save to database
-        try {
-            insertActivityEvent('typing_speed', typingSpeed, this.sessionId);
-            insertActivityEvent('error_rate', errorRate, this.sessionId);
+        // Update EMA-smoothed values
+        // When idle (no keystrokes), blend toward 0 but slowly
+        if (this.keystrokeCount === 0) {
+            // Idle decay: use a gentler alpha so speed doesn't crash to 0 instantly
+            const idleDurationSec = (Date.now() - this._lastActivityTime) / 1000;
+            // After 30s idle, start decaying. After 5min idle, decay faster.
+            const idleDecayAlpha = idleDurationSec > 300 ? 0.3 :
+                idleDurationSec > 60 ? 0.15 : 0.05;
+            this._smoothedTypingSpeed *= (1 - idleDecayAlpha);
+            // Error rate holds steady during idle (it shouldn't change)
+        } else {
+            // Active: blend new reading into the EMA
+            this._smoothedTypingSpeed =
+                this._emaAlpha * rawTypingSpeed +
+                (1 - this._emaAlpha) * this._smoothedTypingSpeed;
+            this._smoothedErrorRate =
+                this._emaAlpha * rawErrorRate +
+                (1 - this._emaAlpha) * this._smoothedErrorRate;
+            this._lastActivityTime = Date.now();
+        }
 
-            console.log(
-                `[KeyboardMonitor] Flushed: speed=${typingSpeed} kpm, errors=${(errorRate * 100).toFixed(1)}%, keystrokes=${this.keystrokeCount}`
-            );
-        } catch (err) {
-            console.error('[KeyboardMonitor] Error saving metrics:', err.message);
+        // Only save to DB if there was actual activity
+        if (this.keystrokeCount > 0) {
+            try {
+                // Save the SMOOTHED values to DB (not raw), so that
+                // the feature extractor reads stable values
+                insertActivityEvent('typing_speed', Math.round(this._smoothedTypingSpeed), this.sessionId);
+                insertActivityEvent('error_rate', +this._smoothedErrorRate.toFixed(4), this.sessionId);
+
+                console.log(
+                    `[KeyboardMonitor] Flushed: raw=${rawTypingSpeed} kpm, smoothed=${Math.round(this._smoothedTypingSpeed)} kpm, errors=${(this._smoothedErrorRate * 100).toFixed(1)}%`
+                );
+            } catch (err) {
+                console.error('[KeyboardMonitor] Error saving metrics:', err.message);
+            }
         }
 
         // Reset counters for next interval
@@ -136,16 +170,36 @@ class KeyboardMonitor {
         const elapsedMs = Date.now() - this.startTime;
         const elapsedMin = elapsedMs / 60000;
 
-        if (elapsedMin < 0.05 || this.keystrokeCount === 0) {
-            return { typingSpeed: 0, errorRate: 0 };
+        // Calculate instantaneous speed for this interval
+        let instantSpeed = 0;
+        let instantErrorRate = 0;
+        if (elapsedMin >= 0.05 && this.keystrokeCount > 0) {
+            instantSpeed = Math.round(this.keystrokeCount / elapsedMin);
+            instantErrorRate = +((this.backspaceCount + this.deleteCount) / this.keystrokeCount).toFixed(4);
+            this._lastActivityTime = Date.now();
+        }
+
+        // Blend instantaneous reading into the EMA
+        if (instantSpeed > 0) {
+            this._smoothedTypingSpeed =
+                this._emaAlpha * instantSpeed +
+                (1 - this._emaAlpha) * this._smoothedTypingSpeed;
+            this._smoothedErrorRate =
+                this._emaAlpha * instantErrorRate +
+                (1 - this._emaAlpha) * this._smoothedErrorRate;
+        } else {
+            // Idle: gentle decay instead of hard drop to 0
+            const idleSec = (Date.now() - this._lastActivityTime) / 1000;
+            if (idleSec > 30) {
+                const decayFactor = idleSec > 300 ? 0.95 : 0.98;
+                this._smoothedTypingSpeed *= decayFactor;
+            }
+            // Error rate holds during idle
         }
 
         return {
-            typingSpeed: Math.round(this.keystrokeCount / elapsedMin),
-            errorRate:
-                this.keystrokeCount > 0
-                    ? +((this.backspaceCount + this.deleteCount) / this.keystrokeCount).toFixed(4)
-                    : 0,
+            typingSpeed: Math.round(this._smoothedTypingSpeed),
+            errorRate: +this._smoothedErrorRate.toFixed(4),
         };
     }
 }

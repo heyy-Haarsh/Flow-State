@@ -55,10 +55,12 @@ export const PEAK_TIME_OPTIONS = [
 
 // ---- Break Types ----
 export const BREAK_TYPES = [
-    { value: 'movement', label: '🏃 Movement Break', duration: 5 },
-    { value: 'rest', label: '😴 Rest Break', duration: 10 },
-    { value: 'social', label: '💬 Social Break', duration: 10 },
-    { value: 'creative', label: '🎨 Creative Break', duration: 15 },
+    { value: 'breathing', label: '🧘 Mindfulness', duration: 3, description: 'Breathing exercises to reset your nervous system', color: '#8B5CF6' },
+    { value: 'movement', label: '🚶 Movement', duration: 5, description: 'Stretch, walk, improve blood flow', color: '#10B981' },
+    { value: 'eye_rest', label: '👁️ Eye Rest', duration: 2, description: '20-20-20 rule for screen fatigue', color: '#3B82F6' },
+    { value: 'creative', label: '🎨 Creative', duration: 5, description: 'Doodle, music, change of mental context', color: '#F59E0B' },
+    { value: 'hydration', label: '🥤 Hydration', duration: 3, description: 'Water & healthy snack break', color: '#06B6D4' },
+    { value: 'social', label: '💬 Social', duration: 5, description: 'Brief conversation to break isolation', color: '#EC4899' },
 ] as const;
 
 // ---- Data Retention ----

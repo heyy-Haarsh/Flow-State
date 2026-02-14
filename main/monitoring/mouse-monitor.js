@@ -21,6 +21,11 @@ class MouseMonitor {
         this.idleCheckId = null;
         this.IDLE_THRESHOLD_MS = 30000; // 30 seconds of no movement = idle
 
+        // EMA-smoothed metrics
+        this._smoothedEntropy = 0.5;
+        this._smoothedIdle = 0;
+        this._emaAlpha = 0.3;
+
         // Bind handlers
         this._boundMouseMove = this._handleMouseMove.bind(this);
     }
@@ -159,22 +164,45 @@ class MouseMonitor {
     }
 
     _flushMetrics() {
-        const entropy = this._calculateEntropy();
+        // Calculate raw metrics for this interval
+        const rawEntropy = this._calculateEntropy();
 
-        // Calculate idle percentage for this 60-second window
-        // Include any currently-active idle time
         let currentIdleMs = this.totalIdleMs;
-        if (this.idleStartTime) {
-            currentIdleMs += Date.now() - this.idleStartTime;
+        // If currently idle, add duration since idle start
+        if (this.idleStartTime && !this.lastMoveTime) {
+            // Not strictly needed if logic is correct, but safe check
         }
-        const idlePercentage = Math.min(1, currentIdleMs / 60000);
+        // Actually this._checkIdle logic sets idleStartTime in future? 
+        // Let's stick to standard logic:
+        const now = Date.now();
+        if (this.lastMoveTime && (now - this.lastMoveTime > this.IDLE_THRESHOLD_MS)) {
+            // We are currently idle
+            const idleDuration = now - Math.max(this.lastMoveTime, this.startTime); // simple approx for this window
+            // Better: totalIdleMs tracks accumulated idle blocks. 
+            // We need current ongoing idle block.
+        }
+
+        // Simplified raw idle calc used previously:
+        let rawIdlePercentage = this.totalIdleMs / 60000;
+        if (this.idleStartTime) {
+            rawIdlePercentage += (Date.now() - this.idleStartTime) / 60000;
+        }
+        rawIdlePercentage = Math.min(1, Math.max(0, rawIdlePercentage));
+
+        // Update EMA
+        this._smoothedEntropy =
+            this._emaAlpha * rawEntropy + (1 - this._emaAlpha) * this._smoothedEntropy;
+
+        this._smoothedIdle =
+            this._emaAlpha * rawIdlePercentage + (1 - this._emaAlpha) * this._smoothedIdle;
 
         try {
-            insertActivityEvent('mouse_entropy', entropy, this.sessionId);
-            insertActivityEvent('idle_percentage', idlePercentage, this.sessionId);
+            // Save SMOOTHED values
+            insertActivityEvent('mouse_entropy', +this._smoothedEntropy.toFixed(3), this.sessionId);
+            insertActivityEvent('idle_percentage', +this._smoothedIdle.toFixed(3), this.sessionId);
 
             console.log(
-                `[MouseMonitor] Flushed: entropy=${entropy.toFixed(3)}, idle=${(idlePercentage * 100).toFixed(1)}%, events=${this.moveEvents.length}`
+                `[MouseMonitor] Flushed: entropy=${this._smoothedEntropy.toFixed(3)} (raw ${rawEntropy.toFixed(2)}), idle=${(this._smoothedIdle * 100).toFixed(1)}%`
             );
         } catch (err) {
             console.error('[MouseMonitor] Error saving metrics:', err.message);
@@ -183,9 +211,12 @@ class MouseMonitor {
         // Reset for next interval
         this.moveEvents = [];
         this.totalIdleMs = 0;
-        // If currently idle, keep the idle start time
-        if (!this.idleStartTime) {
-            this.idleStartTime = null;
+        this.idleStartTime = null;
+
+        // If we were idle, re-establish idle state for the new window
+        const timeSinceLastMove = Date.now() - (this.lastMoveTime || 0);
+        if (timeSinceLastMove > this.IDLE_THRESHOLD_MS) {
+            this.idleStartTime = Date.now(); // Start counting idle from now for the new window
         }
     }
 
@@ -203,14 +234,28 @@ class MouseMonitor {
      * Get live stats for real-time UI updates.
      */
     getLiveStats() {
+        // Calculate raw instantaneous values
+        const rawEntropy = this._calculateEntropy();
+
         let currentIdleMs = this.totalIdleMs;
         if (this.idleStartTime) {
             currentIdleMs += Date.now() - this.idleStartTime;
         }
+        const rawIdle = Math.min(1, currentIdleMs / 60000);
+
+        // Blend into EMA for display
+        // Note: We don't update the persistent EMA here to avoid over-updating it 
+        // between flushes, but we return a blended view.
+        // Actually, for "Live" stats, we usually want the most recent smooth value.
+        // Let's return the last flushed smoothed value blended with current raw 
+        // to give a responsive but stable feel.
+
+        const liveSmoothedEntropy = 0.2 * rawEntropy + 0.8 * this._smoothedEntropy;
+        const liveSmoothedIdle = 0.2 * rawIdle + 0.8 * this._smoothedIdle;
 
         return {
-            entropy: this._calculateEntropy(),
-            idlePercentage: Math.min(1, currentIdleMs / 60000),
+            entropy: liveSmoothedEntropy,
+            idlePercentage: liveSmoothedIdle,
             moveCount: this.moveEvents.length,
         };
     }

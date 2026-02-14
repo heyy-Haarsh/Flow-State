@@ -219,7 +219,7 @@ function createWindow() {
 
   if (isDev) {
     // Try common Vite ports in order
-    const devPort = process.env.VITE_DEV_PORT || '5177';
+    const devPort = process.env.VITE_DEV_PORT || '5173';
     mainWindow.loadURL(`http://localhost:${devPort}`);
     mainWindow.webContents.openDevTools();
     console.log(`[Main] Loading from Vite dev server (http://localhost:${devPort})`);
