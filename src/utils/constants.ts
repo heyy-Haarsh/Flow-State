@@ -72,6 +72,7 @@ export const RETENTION_OPTIONS = [
 // ---- Navigation ----
 export const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard' },
+    { id: 'focus', label: 'Focus', icon: 'Timer' },
     { id: 'tasks', label: 'Tasks', icon: 'CheckSquare' },
     { id: 'analytics', label: 'Analytics', icon: 'BarChart3' },
     { id: 'questionnaire', label: 'Check-in', icon: 'ClipboardList' },

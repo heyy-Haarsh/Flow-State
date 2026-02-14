@@ -9,6 +9,9 @@ const activityAggregator = require('./monitoring/activity-aggregator');
 const globalInputHook = require('./monitoring/global-input-hook');
 const keyboardMonitor = require('./monitoring/keyboard-monitor');
 const mouseMonitor = require('./monitoring/mouse-monitor');
+const windowTracker = require('./monitoring/window-tracker');
+const trayManager = require('./tray/tray-manager');
+const notificationManager = require('./services/notification-manager');
 
 // App Global State
 const state = {
@@ -42,6 +45,7 @@ async function initializeServices() {
     globalInputHook.start();
     keyboardMonitor.start(state.sessionId);
     mouseMonitor.start(state.sessionId);
+    windowTracker.start(state.sessionId);
     console.log('[Main] Global input tracking ACTIVE');
   } else {
     console.warn('[Main] Global hooks unavailable — falling back to in-app tracking only');
@@ -49,27 +53,40 @@ async function initializeServices() {
 }
 
 // ---- Energy score update loop ----
-// Push energy score + interventions to renderer every 30 seconds
+// Push energy score + interventions to renderer + update tray every 60 seconds
 let energyInterval = null;
 
 function startEnergyLoop() {
-  energyInterval = setInterval(async () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    try {
-      const pipelineResult = await runPipeline();
+  // Run immediately on start
+  updateEnergyAndTray();
 
-      // Send energy score
-      mainWindow.webContents.send('energy-update', pipelineResult.energyScore || 70);
+  // Then run every 60 seconds
+  energyInterval = setInterval(async () => {
+    await updateEnergyAndTray();
+  }, 60000); // 60 seconds for tray updates
+}
+
+async function updateEnergyAndTray() {
+  try {
+    const pipelineResult = await runPipeline();
+    const energyScore = pipelineResult.energyScore || 70;
+
+    // Update tray icon
+    trayManager.updateIcon(energyScore);
+
+    // Send energy score to renderer (if window exists)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('energy-update', energyScore);
 
       // Check for interventions
       const intervention = checkInterventions(pipelineResult);
       if (intervention) {
         mainWindow.webContents.send('intervention', intervention);
       }
-    } catch (err) {
-      // Silently continue
     }
-  }, 30000);
+  } catch (err) {
+    console.error('[Main] Error in energy update loop:', err);
+  }
 }
 
 function stopEnergyLoop() {
@@ -201,9 +218,11 @@ function createWindow() {
     !require('fs').existsSync(path.join(__dirname, '../dist/index.html'));
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    // Try common Vite ports in order
+    const devPort = process.env.VITE_DEV_PORT || '5177';
+    mainWindow.loadURL(`http://localhost:${devPort}`);
     mainWindow.webContents.openDevTools();
-    console.log('[Main] Loading from Vite dev server (http://localhost:5173)');
+    console.log(`[Main] Loading from Vite dev server (http://localhost:${devPort})`);
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
@@ -211,6 +230,15 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     startEnergyLoop();
+  });
+
+  // Close to tray instead of quitting (Windows/Linux)
+  mainWindow.on('close', (event) => {
+    if (process.platform !== 'darwin' && !app.isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+      return false;
+    }
   });
 
   mainWindow.on('closed', () => {
@@ -264,12 +292,16 @@ ipcMain.handle('start-monitoring', () => {
   if (!mouseMonitor.getStatus().isRunning) {
     mouseMonitor.start(state.sessionId);
   }
+  if (!windowTracker.getStatus().isRunning) {
+    windowTracker.start(state.sessionId);
+  }
   return { success: true };
 });
 
 ipcMain.handle('stop-monitoring', () => {
   keyboardMonitor.stop();
   mouseMonitor.stop();
+  windowTracker.stop();
   return { success: true };
 });
 
@@ -380,11 +412,77 @@ ipcMain.handle('respond-intervention', (_, id, accepted) => {
   return queries.updateInterventionResponse(id, accepted, 0);
 });
 
+// Notifications
+ipcMain.handle('update-notification-settings', (_, settings) => {
+  notificationManager.updateSettings(settings);
+  return { success: true };
+});
+
+ipcMain.handle('test-notification', () => {
+  notificationManager.showTest();
+  return { success: true };
+});
+
+// App Usage Tracking
+ipcMain.handle('get-app-usage', (_, hours) => {
+  return queries.getAppUsageByRange(hours || 24);
+});
+
+ipcMain.handle('get-productive-time', (_, hours) => {
+  return queries.getProductiveTime(hours || 24);
+});
+
+ipcMain.handle('get-app-categories', () => {
+  return queries.getAppCategories();
+});
+
+ipcMain.handle('set-app-category', (_, appName, category) => {
+  queries.setAppCategory(appName, category);
+  return { success: true };
+});
+
+// Focus Sessions
+ipcMain.handle('start-focus-session', (_, data) => {
+  const sessionId = queries.startFocusSession(data);
+  // Update tray to show focus status
+  const timeRemaining = Math.floor(data.plannedDuration / 60);
+  trayManager.updateContextMenu({
+    focusSessionActive: true,
+    focusTimeRemaining: `${timeRemaining} min`,
+  });
+  return { sessionId };
+});
+
+ipcMain.handle('end-focus-session', (_, sessionId, data) => {
+  queries.endFocusSession(sessionId, data);
+  // Reset tray menu
+  trayManager.updateContextMenu({ focusSessionActive: false });
+  return { success: true };
+});
+
+ipcMain.handle('get-active-focus-session', () => {
+  return queries.getActiveFocusSession();
+});
+
+ipcMain.handle('get-focus-history', (_, limit) => {
+  return queries.getFocusHistory(limit || 20);
+});
+
+ipcMain.handle('get-focus-stats', (_, days) => {
+  return queries.getFocusStats(days || 7);
+});
+
 // ---- App Lifecycle ----
 
 app.whenReady().then(() => {
   initializeServices();
   createWindow();
+
+  // Initialize system tray
+  trayManager.initialize(mainWindow);
+
+  // Initialize notification manager
+  notificationManager.initialize(mainWindow);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -392,21 +490,22 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    // Cleanup before exit
-    keyboardMonitor.stop();
-    mouseMonitor.stop();
-    globalInputHook.stop();
-    activityAggregator.stop();
-    stopEnergyLoop();
-    app.quit();
+  // Don't quit on window close - app runs in tray
+  // Only quit if explicitly requested
+  if (process.platform === 'darwin') {
+    app.dock.hide();
   }
 });
 
 app.on('before-quit', () => {
+  app.isQuitting = true;
+
+  // Cleanup before exit
   keyboardMonitor.stop();
   mouseMonitor.stop();
+  windowTracker.stop();
   globalInputHook.stop();
   activityAggregator.stop();
   stopEnergyLoop();
+  trayManager.destroy();
 });

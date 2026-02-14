@@ -5,6 +5,7 @@ import {
     ClipboardList,
     Shield,
     Settings,
+    Timer,
     Zap,
     ChevronLeft,
     ChevronRight,
@@ -14,6 +15,7 @@ import Tooltip from './Tooltip';
 
 const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'focus', label: 'Focus', icon: Timer },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'questionnaire', label: 'Check-in', icon: ClipboardList },

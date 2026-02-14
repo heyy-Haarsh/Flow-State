@@ -252,6 +252,172 @@ const cleanupOldData = (retentionDays) => {
   `).run();
 };
 
+// App Usage Tracking
+
+const insertAppUsage = ({ appName, duration, sessionId }) => {
+  const db = getDatabase();
+  return db.prepare(`
+    INSERT INTO app_usage (app_name, duration, session_id)
+    VALUES (?, ?, ?)
+  `).run(appName, duration, sessionId);
+};
+
+const getAppUsageByRange = (hours = 24) => {
+  const db = getDatabase();
+  return db.prepare(`
+    SELECT
+      app_name,
+      SUM(duration) as total_duration,
+      COUNT(*) as session_count
+    FROM app_usage
+    WHERE timestamp > datetime('now', '-${hours} hours')
+    GROUP BY app_name
+    ORDER BY total_duration DESC
+  `).all();
+};
+
+const getAppCategories = () => {
+  const db = getDatabase();
+  return db.prepare('SELECT * FROM app_categories').all();
+};
+
+const setAppCategory = (appName, category) => {
+  const db = getDatabase();
+  return db.prepare(`
+    INSERT OR REPLACE INTO app_categories (app_name, category)
+    VALUES (?, ?)
+  `).run(appName, category);
+};
+
+const getProductiveTime = (hours = 24) => {
+  const db = getDatabase();
+  const result = db.prepare(`
+    SELECT
+      COALESCE(ac.category, 'neutral') as category,
+      SUM(au.duration) as total_duration
+    FROM app_usage au
+    LEFT JOIN app_categories ac ON au.app_name = ac.app_name
+    WHERE au.timestamp > datetime('now', '-${hours} hours')
+    GROUP BY category
+  `).all();
+
+  const totals = {
+    productive: 0,
+    neutral: 0,
+    distracting: 0,
+  };
+
+  result.forEach(row => {
+    totals[row.category] = row.total_duration || 0;
+  });
+
+  return totals;
+};
+
+// Focus Sessions
+
+const startFocusSession = ({ taskId, plannedDuration, energyAtStart, sessionType }) => {
+  const db = getDatabase();
+
+  // First, auto-end any active sessions that were abandoned
+  // (sessions older than 3 hours without an end_time are considered abandoned)
+  db.prepare(`
+    UPDATE focus_sessions
+    SET end_time = CURRENT_TIMESTAMP,
+        actual_duration = CAST((julianday(CURRENT_TIMESTAMP) - julianday(start_time)) * 86400 AS INTEGER),
+        completed = 0
+    WHERE end_time IS NULL
+    AND start_time < datetime('now', '-3 hours')
+  `).run();
+
+  const result = db.prepare(`
+    INSERT INTO focus_sessions (task_id, planned_duration, energy_at_start, session_type)
+    VALUES (?, ?, ?, ?)
+  `).run(taskId || null, plannedDuration, energyAtStart, sessionType || 'pomodoro');
+
+  return result.lastInsertRowid;
+};
+
+const endFocusSession = (sessionId, { energyAtEnd, completed }) => {
+  const db = getDatabase();
+
+  // Get session start time to calculate actual duration
+  const session = db.prepare('SELECT start_time FROM focus_sessions WHERE id = ?').get(sessionId);
+
+  if (!session) return null;
+
+  const actualDuration = Math.floor((Date.now() - new Date(session.start_time).getTime()) / 1000);
+
+  return db.prepare(`
+    UPDATE focus_sessions
+    SET end_time = CURRENT_TIMESTAMP,
+        actual_duration = ?,
+        energy_at_end = ?,
+        completed = ?
+    WHERE id = ?
+  `).run(actualDuration, energyAtEnd, completed ? 1 : 0, sessionId);
+};
+
+const recordInterruption = ({ sessionId, interruptionType, appName, durationSeconds }) => {
+  const db = getDatabase();
+
+  // Insert interruption
+  db.prepare(`
+    INSERT INTO focus_interruptions (session_id, interruption_type, app_name, duration_seconds)
+    VALUES (?, ?, ?, ?)
+  `).run(sessionId, interruptionType, appName, durationSeconds || 0);
+
+  // Increment interruption count
+  db.prepare(`
+    UPDATE focus_sessions
+    SET interruption_count = interruption_count + 1
+    WHERE id = ?
+  `).run(sessionId);
+};
+
+const getActiveFocusSession = () => {
+  const db = getDatabase();
+  return db.prepare(`
+    SELECT * FROM focus_sessions
+    WHERE end_time IS NULL
+    ORDER BY start_time DESC
+    LIMIT 1
+  `).get();
+};
+
+const getFocusHistory = (limit = 20) => {
+  const db = getDatabase();
+  return db.prepare(`
+    SELECT
+      fs.*,
+      t.title as task_title,
+      t.complexity as task_complexity
+    FROM focus_sessions fs
+    LEFT JOIN tasks t ON fs.task_id = t.id
+    WHERE fs.end_time IS NOT NULL
+    ORDER BY fs.start_time DESC
+    LIMIT ?
+  `).all(limit);
+};
+
+const getFocusStats = (days = 7) => {
+  const db = getDatabase();
+
+  const stats = db.prepare(`
+    SELECT
+      COUNT(*) as total_sessions,
+      SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) as completed_sessions,
+      SUM(actual_duration) as total_focus_time,
+      AVG(actual_duration) as avg_session_duration,
+      SUM(interruption_count) as total_interruptions,
+      AVG(interruption_count) as avg_interruptions_per_session
+    FROM focus_sessions
+    WHERE start_time > datetime('now', '-${days} days')
+  `).get();
+
+  return stats;
+};
+
 module.exports = {
   insertActivityEvent,
   getRecentEvents,
@@ -275,4 +441,15 @@ module.exports = {
   getAllSettings,
   cleanupOldData,
   getCompletedTasksCount,
+  insertAppUsage,
+  getAppUsageByRange,
+  getAppCategories,
+  setAppCategory,
+  getProductiveTime,
+  startFocusSession,
+  endFocusSession,
+  recordInterruption,
+  getActiveFocusSession,
+  getFocusHistory,
+  getFocusStats,
 };

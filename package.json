@@ -15,8 +15,10 @@
         "ml:train": "cd ml-service && python train_model.py"
     },
     "dependencies": {
+        "active-win": "^7.0.0",
         "better-sqlite3": "^9.2.2",
         "date-fns": "^3.0.0",
+        "ffi-napi": "^4.0.3",
         "lucide-react": "^0.303.0",
         "onnxruntime-node": "^1.16.3",
         "react": "^18.2.0",
