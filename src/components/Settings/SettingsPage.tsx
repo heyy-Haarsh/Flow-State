@@ -1,8 +1,9 @@
-import { Settings as SettingsIcon, Monitor, Bell, Brain, Palette, Info } from 'lucide-react';
+import { Settings as SettingsIcon, Monitor, Bell, Brain, Palette, Info, Database } from 'lucide-react';
 import Card from '@/components/UI/Card';
 import Button from '@/components/UI/Button';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useState } from 'react';
+import DatabaseStats from '@/components/Debug/DatabaseStats';
 
 declare global {
     interface Window {
@@ -179,6 +180,15 @@ export default function SettingsPage() {
                         {settings.calibrationDay < 7 ? `Train Model (${7 - settings.calibrationDay} days left)` : 'Retrain Model'}
                     </Button>
                 </div>
+            </Card>
+
+            {/* Database Stats */}
+            <Card>
+                <h3 className="font-semibold text-dark-100 flex items-center gap-2 mb-4">
+                    <Database size={16} className="text-cyan-400" />
+                    Database Statistics
+                </h3>
+                <DatabaseStats />
             </Card>
 
             {/* About */}
