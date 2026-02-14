@@ -11,8 +11,8 @@ export default function BackendTasks() {
 
   useEffect(() => {
     loadTasks();
-    // Refresh every 30 seconds
-    const interval = setInterval(loadTasks, 30000);
+    // Refresh every 3 seconds for near real-time updates
+    const interval = setInterval(loadTasks, 3000);
     return () => clearInterval(interval);
   }, []);
 

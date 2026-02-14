@@ -9,7 +9,7 @@ class TaskAggregator {
   constructor() {
     this.backendTasks = [];
     this.lastFetch = 0;
-    this.CACHE_TTL = 60000; // 1 minute cache
+    this.CACHE_TTL = 3000; // 3 seconds cache for near real-time updates
   }
 
   /**
