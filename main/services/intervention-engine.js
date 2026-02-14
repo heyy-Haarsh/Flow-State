@@ -11,6 +11,7 @@
 
 const { getBaseline, saveIntervention } = require('../database/queries');
 const mlPipeline = require('./ml-inference');
+const notificationManager = require('./notification-manager');
 
 class InterventionEngine {
     constructor() {
@@ -221,6 +222,13 @@ class InterventionEngine {
             });
         } catch (error) {
             console.error('[InterventionEngine] Error saving intervention:', error);
+        }
+
+        // Show desktop notification
+        try {
+            notificationManager.showIntervention(intervention);
+        } catch (error) {
+            console.error('[InterventionEngine] Error showing notification:', error);
         }
 
         return intervention;

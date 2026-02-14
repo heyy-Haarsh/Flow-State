@@ -112,6 +112,7 @@ function runMigrations(db) {
       value TEXT
     );
 
+<<<<<<< HEAD
     -- Peak Analysis Results (Maintained by PeakDetector)
     CREATE TABLE IF NOT EXISTS peak_analysis_results (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,6 +126,51 @@ function runMigrations(db) {
       sustainability_score REAL,
       confidence_level REAL,
       window_group_id INTEGER
+=======
+    -- App usage tracking
+    CREATE TABLE IF NOT EXISTS app_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      app_name TEXT NOT NULL,
+      duration INTEGER NOT NULL,
+      session_id TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_app_usage_timestamp ON app_usage(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_app_usage_app_name ON app_usage(app_name);
+
+    -- App categories (productive/neutral/distracting)
+    CREATE TABLE IF NOT EXISTS app_categories (
+      app_name TEXT PRIMARY KEY,
+      category TEXT CHECK(category IN ('productive', 'neutral', 'distracting')) DEFAULT 'neutral'
+    );
+
+    -- Focus sessions
+    CREATE TABLE IF NOT EXISTS focus_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER,
+      start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+      end_time DATETIME,
+      planned_duration INTEGER,
+      actual_duration INTEGER,
+      interruption_count INTEGER DEFAULT 0,
+      energy_at_start INTEGER,
+      energy_at_end INTEGER,
+      completed BOOLEAN DEFAULT 0,
+      session_type TEXT DEFAULT 'pomodoro',
+      FOREIGN KEY (task_id) REFERENCES tasks(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_focus_sessions_start ON focus_sessions(start_time);
+
+    -- Focus interruptions
+    CREATE TABLE IF NOT EXISTS focus_interruptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      interruption_type TEXT,
+      app_name TEXT,
+      duration_seconds INTEGER,
+      FOREIGN KEY (session_id) REFERENCES focus_sessions(id)
+>>>>>>> f4d4a1e0a3e3349d8ce471f9a57400bd5ce8293c
     );
   `);
 

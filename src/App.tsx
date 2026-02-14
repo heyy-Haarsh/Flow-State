@@ -11,14 +11,22 @@ import { PrivacyDashboard } from '@/components/Privacy';
 import SettingsPage from '@/components/Settings/SettingsPage';
 import { BreakSuggestion } from '@/components/Interventions';
 import { FocusModeAlert } from '@/components/Interventions';
+import FocusPage from '@/components/FocusSessions/FocusPage';
 
 import { useState, useEffect } from 'react';
+
+declare global {
+    interface Window {
+        electron: any;
+    }
+}
 
 function App() {
     // Start activity tracking
     useActivityTracker();
 
     const activeTab = useUIStore((s) => s.activeTab);
+    const setActiveTab = useUIStore((s) => s.setActiveTab);
     const cognitiveState = useFlowStateStore((s) => s.cognitiveState);
     const settings = useFlowStateStore((s) => s.settings);
 
@@ -43,10 +51,28 @@ function App() {
         }
     }, [cognitiveState.isInFlowState, flowAlertDismissed]);
 
+    // Listen for tray menu navigation events
+    useEffect(() => {
+        if (window.electron?.onNavigateTo) {
+            window.electron.onNavigateTo((page: string) => {
+                setActiveTab(page as any);
+            });
+        }
+
+        if (window.electron?.onTriggerBreak) {
+            window.electron.onTriggerBreak(() => {
+                setShowBreakSuggestion(true);
+                setActiveTab('dashboard');
+            });
+        }
+    }, [setActiveTab]);
+
     const renderPage = () => {
         switch (activeTab) {
             case 'dashboard':
                 return <Dashboard />;
+            case 'focus':
+                return <FocusPage />;
             case 'tasks':
                 return <TaskManager />;
             case 'analytics':

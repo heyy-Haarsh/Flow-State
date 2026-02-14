@@ -52,4 +52,29 @@ contextBridge.exposeInMainWorld('electron', {
     startMonitoring: () => ipcRenderer.invoke('start-monitoring'),
     stopMonitoring: () => ipcRenderer.invoke('stop-monitoring'),
     getMonitoringStatus: () => ipcRenderer.invoke('get-monitoring-status'),
+
+    // Tray menu navigation
+    onNavigateTo: (callback) => {
+        ipcRenderer.on('navigate-to', (_event, page) => callback(page));
+    },
+    onTriggerBreak: (callback) => {
+        ipcRenderer.on('trigger-break', () => callback());
+    },
+
+    // Notifications
+    updateNotificationSettings: (settings) => ipcRenderer.invoke('update-notification-settings', settings),
+    testNotification: () => ipcRenderer.invoke('test-notification'),
+
+    // App Usage Tracking
+    getAppUsage: (hours) => ipcRenderer.invoke('get-app-usage', hours),
+    getProductiveTime: (hours) => ipcRenderer.invoke('get-productive-time', hours),
+    getAppCategories: () => ipcRenderer.invoke('get-app-categories'),
+    setAppCategory: (appName, category) => ipcRenderer.invoke('set-app-category', appName, category),
+
+    // Focus Sessions
+    startFocusSession: (data) => ipcRenderer.invoke('start-focus-session', data),
+    endFocusSession: (sessionId, data) => ipcRenderer.invoke('end-focus-session', sessionId, data),
+    getActiveFocusSession: () => ipcRenderer.invoke('get-active-focus-session'),
+    getFocusHistory: (limit) => ipcRenderer.invoke('get-focus-history', limit),
+    getFocusStats: (days) => ipcRenderer.invoke('get-focus-stats', days),
 });

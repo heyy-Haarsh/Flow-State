@@ -2,9 +2,22 @@ import { Settings as SettingsIcon, Monitor, Bell, Brain, Palette, Info } from 'l
 import Card from '@/components/UI/Card';
 import Button from '@/components/UI/Button';
 import { useSettingsStore } from '@/stores/settings-store';
+import { useState } from 'react';
+
+declare global {
+    interface Window {
+        electron: any;
+    }
+}
 
 export default function SettingsPage() {
     const settings = useSettingsStore();
+    const [notificationSettings, setNotificationSettings] = useState({
+        enabled: true,
+        breakReminders: true,
+        taskSuggestions: true,
+        flowAlerts: true,
+    });
 
     return (
         <div className="space-y-6">
@@ -32,6 +45,69 @@ export default function SettingsPage() {
                         checked={settings.breakReminderEnabled}
                         onChange={(v) => settings.updateSetting('breakReminderEnabled', v)}
                     />
+                </div>
+            </Card>
+
+            {/* Notifications */}
+            <Card>
+                <h3 className="font-semibold text-dark-100 flex items-center gap-2 mb-4">
+                    <Bell size={16} className="text-amber-400" />
+                    Desktop Notifications
+                </h3>
+                <div className="space-y-4">
+                    <ToggleRow
+                        label="Enable Notifications"
+                        description="Show desktop notifications for interventions and alerts"
+                        checked={notificationSettings.enabled}
+                        onChange={(v) => {
+                            const updated = { ...notificationSettings, enabled: v };
+                            setNotificationSettings(updated);
+                            window.electron?.updateNotificationSettings(updated);
+                        }}
+                    />
+                    <ToggleRow
+                        label="Break Reminders"
+                        description="Notify when it's time to take a break"
+                        checked={notificationSettings.breakReminders}
+                        onChange={(v) => {
+                            const updated = { ...notificationSettings, breakReminders: v };
+                            setNotificationSettings(updated);
+                            window.electron?.updateNotificationSettings(updated);
+                        }}
+                    />
+                    <ToggleRow
+                        label="Task Suggestions"
+                        description="Get notified about task switching opportunities"
+                        checked={notificationSettings.taskSuggestions}
+                        onChange={(v) => {
+                            const updated = { ...notificationSettings, taskSuggestions: v };
+                            setNotificationSettings(updated);
+                            window.electron?.updateNotificationSettings(updated);
+                        }}
+                    />
+                    <ToggleRow
+                        label="Flow State Alerts"
+                        description="Notify when you enter high-focus flow state"
+                        checked={notificationSettings.flowAlerts}
+                        onChange={(v) => {
+                            const updated = { ...notificationSettings, flowAlerts: v };
+                            setNotificationSettings(updated);
+                            window.electron?.updateNotificationSettings(updated);
+                        }}
+                    />
+
+                    <div className="pt-2">
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => {
+                                window.electron?.testNotification();
+                            }}
+                        >
+                            Test Notification
+                        </Button>
+                    </div>
                 </div>
             </Card>
 
