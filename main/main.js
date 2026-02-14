@@ -12,6 +12,7 @@ const mouseMonitor = require('./monitoring/mouse-monitor');
 const windowTracker = require('./monitoring/window-tracker');
 const trayManager = require('./tray/tray-manager');
 const notificationManager = require('./services/notification-manager');
+const taskAggregator = require('./services/task-aggregator');
 
 // App Global State
 const state = {
@@ -143,8 +144,8 @@ async function runPipeline() {
       taskSwitchesLastHour: 0, // TODO: track from task switch events
       userAvgSessionLength: 90,
       historicalAcceptanceRate: interventionState.historicalAcceptanceRate,
-      currentTask: {}, // TODO: get from task manager
-      pendingTasks: [],
+      currentTask: await taskAggregator.getCurrentTask(),
+      pendingTasks: await taskAggregator.getPendingTasks(),
     };
 
     // 7. Extract unified features
@@ -219,7 +220,7 @@ function createWindow() {
 
   if (isDev) {
     // Try common Vite ports in order
-    const devPort = process.env.VITE_DEV_PORT || '5178';
+    const devPort = process.env.VITE_DEV_PORT || '5174';
     mainWindow.loadURL(`http://localhost:${devPort}`);
     mainWindow.webContents.openDevTools();
     console.log(`[Main] Loading from Vite dev server (http://localhost:${devPort})`);
