@@ -15,6 +15,7 @@ import { useFlowStateStore } from '@/stores/flowstate-store';
 import { useTasks } from '@/hooks/useTasks';
 import { getComplexityColor, getComplexityLabel } from '@/utils/formatters';
 import type { TaskComplexity } from '@/types/flowstate';
+import BackendTasks from './BackendTasks';
 
 function TaskForm({ onClose }: { onClose: () => void }) {
     const addTask = useFlowStateStore((s) => s.addTask);
@@ -117,10 +118,13 @@ export default function TaskManager() {
 
     return (
         <div className="space-y-6">
+            {/* Backend Tasks - Assigned by Manager */}
+            <BackendTasks />
+
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-2xl font-bold text-dark-100">Tasks</h2>
+                    <h2 className="text-2xl font-bold text-dark-100">My Tasks</h2>
                     <p className="text-sm text-dark-400 mt-1">
                         {stats.completed}/{stats.total} completed • {stats.inProgress} in progress
                     </p>

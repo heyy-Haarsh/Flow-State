@@ -77,4 +77,7 @@ contextBridge.exposeInMainWorld('electron', {
     getActiveFocusSession: () => ipcRenderer.invoke('get-active-focus-session'),
     getFocusHistory: (limit) => ipcRenderer.invoke('get-focus-history', limit),
     getFocusStats: (days) => ipcRenderer.invoke('get-focus-stats', days),
+
+    // Debug
+    getDatabaseStats: () => ipcRenderer.invoke('get-database-stats'),
 });

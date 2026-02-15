@@ -12,6 +12,7 @@ const mouseMonitor = require('./monitoring/mouse-monitor');
 const windowTracker = require('./monitoring/window-tracker');
 const trayManager = require('./tray/tray-manager');
 const notificationManager = require('./services/notification-manager');
+const taskAggregator = require('./services/task-aggregator');
 
 // App Global State
 const state = {
@@ -143,8 +144,8 @@ async function runPipeline() {
       taskSwitchesLastHour: 0, // TODO: track from task switch events
       userAvgSessionLength: 90,
       historicalAcceptanceRate: interventionState.historicalAcceptanceRate,
-      currentTask: {}, // TODO: get from task manager
-      pendingTasks: [],
+      currentTask: await taskAggregator.getCurrentTask(),
+      pendingTasks: await taskAggregator.getPendingTasks(),
     };
 
     // 7. Extract unified features
@@ -219,7 +220,7 @@ function createWindow() {
 
   if (isDev) {
     // Try common Vite ports in order
-    const devPort = process.env.VITE_DEV_PORT || '5173';
+    const devPort = process.env.VITE_DEV_PORT || '5174';
     mainWindow.loadURL(`http://localhost:${devPort}`);
     mainWindow.webContents.openDevTools();
     console.log(`[Main] Loading from Vite dev server (http://localhost:${devPort})`);
@@ -416,6 +417,40 @@ ipcMain.handle('respond-intervention', (_, id, accepted) => {
 ipcMain.handle('update-notification-settings', (_, settings) => {
   notificationManager.updateSettings(settings);
   return { success: true };
+});
+
+// Database Stats (for debugging)
+ipcMain.handle('get-database-stats', () => {
+  try {
+    const database = db.getDatabase();
+
+    // Get table counts
+    const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();
+    const tableCounts = {};
+    tables.forEach(t => {
+      const count = database.prepare(`SELECT COUNT(*) as count FROM ${t.name}`).get().count;
+      tableCounts[t.name] = count;
+    });
+
+    // Get recent data samples
+    const recentSessions = database.prepare('SELECT * FROM focus_sessions ORDER BY start_time DESC LIMIT 5').all();
+    const recentTasks = database.prepare('SELECT * FROM tasks ORDER BY created_at DESC LIMIT 5').all();
+    const recentEvents = database.prepare('SELECT * FROM activity_events ORDER BY timestamp DESC LIMIT 10').all();
+    const recentMetrics = database.prepare('SELECT * FROM metrics_hourly ORDER BY hour_start DESC LIMIT 3').all();
+
+    return {
+      tableCounts,
+      samples: {
+        focusSessions: recentSessions,
+        tasks: recentTasks,
+        activityEvents: recentEvents,
+        hourlyMetrics: recentMetrics,
+      },
+      dbPath: require('path').join(require('electron').app.getPath('userData'), 'flowstate.db'),
+    };
+  } catch (err) {
+    return { error: err.message };
+  }
 });
 
 ipcMain.handle('test-notification', () => {

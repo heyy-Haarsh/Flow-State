@@ -16,6 +16,7 @@
     },
     "dependencies": {
         "active-win": "^7.0.0",
+        "axios": "^1.13.5",
         "better-sqlite3": "^9.2.2",
         "date-fns": "^3.0.0",
         "ffi-napi": "^4.0.3",
