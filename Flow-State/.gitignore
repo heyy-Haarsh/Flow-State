@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Build output
+dist/
+build/
+out/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# ML Models (large binary files)
+main/ml/models/*.onnx
+ml-service/models/*.onnx
+ml-service/models/*.pkl
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+electron_log.txt
+install_log.txt
+install_log2.txt
+rebuild_log.txt
+
+# Electron
+*.asar
+
+# Python tooling
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+*.egg-info/

@@ -1,0 +1,65 @@
+﻿============================================================
+  FlowState - Pipeline Model Testing Suite
+============================================================
+
+  Loading models...
+  [OK] Energy Model loaded: models\energy-model.onnx
+       Input:  float_input [None, 18]
+       Output: variable [None, 1]
+  [OK] Break Model loaded: models\break-model.onnx
+       Input:  float_input [None, 24]
+       Output: label [1]
+  [OK] Task Switch Model loaded: models\task-switch-model.onnx
+       Input:  float_input [None, 21]
+       Output: label [1]
+
+  Generating unseen test data (seed=99)...
+
+============================================================
+  TEST 1: ENERGY MODEL ACCURACY
+============================================================
+
+  Samples: 72
+  MAE:  1.92  |  RMSE: 3.44
+  R┬▓:   0.9462  |  MAPE: 4.8%
+  [EXCELLENT] MAE < 5
+  Within  5 pts: 86.1%  |  Within 10 pts: 97.2%
+
+============================================================
+  TEST 2: BREAK MODEL ACCURACY
+============================================================
+
+  Samples: 72  |  Threshold: 0.500
+  Accuracy:  98.6%
+  Precision: 92.9%  |  Recall: 100.0%
+  F1 Score:  96.3%
+  TP: 13  FP: 1  FN: 0  TN: 58
+
+  Avg prob (positive): 1.000
+  Avg prob (negative): 0.017
+
+============================================================
+  TEST 3: TASK SWITCH MODEL ACCURACY
+============================================================
+
+  Samples: 72  |  Threshold: 0.500
+  Accuracy:  98.6%
+  Precision: 96.8%  |  Recall: 100.0%
+  F1 Score:  98.4%
+  TP: 30  FP: 1  FN: 0  TN: 41
+
+============================================================
+  TEST 4: FULL PIPELINE SCENARIOS
+============================================================
+
+  Scenario                             Energy  Break?  Switch?
+  ----------------------------------- ------- ------- --------
+  Morning - Well Rested, Easy Task         83    no (0.00)      no (0.00)
+  Long Session, Declining Energy           31   YES (1.00)     YES (1.00)
+  Post-Break, Fresh Start                  81    no (0.00)      no (0.00)
+  Late Night, Exhausted, Hard Task         18   YES (1.00)     YES (1.00)
+  Deep Focus Flow State                    83    no (0.00)      no (0.00)
+
+============================================================
+  Testing complete!
+============================================================
