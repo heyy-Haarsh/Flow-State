@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Build output
+dist/
+build/
+out/
+
+# Environment — never commit secrets
+.env
+.env.local
+.env.production
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ML model binaries
+**/*.onnx
+**/*.pkl
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+electron_log.txt
+install_log.txt
+install_log2.txt
+rebuild_log.txt
+
+# Electron artifacts
+*.asar
+
+# Misc
+nul
